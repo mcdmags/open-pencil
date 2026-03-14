@@ -62,11 +62,14 @@ export const render = defineTool({
   },
   execute: async (figma, args) => {
     const { renderJSX } = await import('../render/render-jsx.js')
+    const { computeAllLayouts } = await import('../layout.js')
     const result = await renderJSX(figma.graph, args.jsx, {
       parentId: args.parent_id ?? figma.currentPageId,
       x: args.x,
       y: args.y
     })
+    // Compute layout immediately so exported images reflect flex positioning
+    computeAllLayouts(figma.graph)
     return { id: result.id, name: result.name, type: result.type, children: result.childIds }
   }
 })

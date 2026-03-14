@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -14,8 +16,9 @@ import {
   renderNodesToImage,
   SkiaRenderer,
   collectFontKeys,
-  initFontService,
-  loadFont
+  loadFont,
+  markFontLoaded,
+  setTextMeasurer
 } from '@open-pencil/core'
 
 import type { ToolDef, ParamDef, ParamType, ExportFormat } from '@open-pencil/core'
@@ -69,6 +72,24 @@ async function getCanvasKit(): Promise<CanvasKit> {
   return ckInstance
 }
 
+/** Pre-load bundled Inter font from disk into the font cache. */
+async function ensureInterFont(): Promise<void> {
+  const mcpDir = dirname(fileURLToPath(import.meta.url))
+  // Try multiple locations: installed package (../fonts/), project root (public/)
+  const candidates = [
+    join(mcpDir, '..', 'fonts', 'Inter-Regular.ttf'),
+    join(mcpDir, '..', '..', '..', 'public', 'Inter-Regular.ttf'),
+  ]
+  for (const interPath of candidates) {
+    if (existsSync(interPath)) {
+      const buf = await readFile(interPath)
+      const fontData = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+      markFontLoaded('Inter', 'Regular', fontData)
+      return
+    }
+  }
+}
+
 export function createServer(version: string, options: CreateServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'open-pencil', version })
   const enableEval = options.enableEval ?? true
@@ -85,6 +106,10 @@ export function createServer(version: string, options: CreateServerOptions = {})
     const api = new FigmaAPI(g)
     if (currentPageId) api.currentPage = api.wrapNode(currentPageId)
     api.exportImage = async (nodeIds, opts) => {
+      // 1. Pre-load Inter font into cache so renderer.loadFonts() finds it
+      await ensureInterFont()
+
+      // 2. Create renderer and load fonts (picks up cached Inter)
       const ck = await getCanvasKit()
       const surface = ck.MakeSurface(1, 1)
       if (!surface) throw new Error('Failed to create CanvasKit surface')
@@ -92,15 +117,21 @@ export function createServer(version: string, options: CreateServerOptions = {})
       renderer.viewportWidth = 1
       renderer.viewportHeight = 1
       renderer.dpr = 1
-
-      // Initialize font provider and load fonts used by the exported nodes
       await renderer.loadFonts()
+
+      // Load any additional fonts used by the exported nodes
       const pageId = currentPageId ?? g.getPages()[0].id
       const fontKeys = collectFontKeys(g, nodeIds)
       for (const [family, style] of fontKeys) {
         await loadFont(family, style)
       }
 
+      // 3. Use the renderer's ParagraphBuilder-based measurer for layout.
+      //    This guarantees measurement matches rendering (same fonts, same shaping).
+      setTextMeasurer((node, maxWidth) => renderer.measureTextNode(node, maxWidth))
+      computeAllLayouts(g)
+
+      // 4. Render with the same renderer that measured the text
       return renderNodesToImage(ck, renderer, g, pageId, nodeIds, {
         scale: opts.scale ?? 1,
         format: (opts.format ?? 'PNG') as ExportFormat
@@ -195,6 +226,40 @@ export function createServer(version: string, options: CreateServerOptions = {})
         const pages = graph.getPages()
         currentPageId = pages[0]?.id ?? null
         return ok({ page: pages[0]?.name, id: currentPageId })
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  register(
+    'export_image_file',
+    {
+      description: 'Export nodes as a PNG/JPG/WEBP image file saved to disk. Returns the file path and size.',
+      inputSchema: z.object({
+        path: z.string().describe('Absolute path to save the image file (e.g. /tmp/design.png)'),
+        ids: z.array(z.string()).min(1).optional().describe('Node IDs to export. Omit to export all top-level nodes on the current page.'),
+        format: z.enum(['PNG', 'JPG', 'WEBP']).optional().describe('Image format (default: PNG)'),
+        scale: z.number().min(0.1).max(4).optional().describe('Export scale multiplier (default: 2)')
+      })
+    },
+    async ({ path: filePath, ids, format, scale }: { path: string; ids?: string[]; format?: string; scale?: number }) => {
+      try {
+        // Validate path BEFORE expensive render
+        const outPath = resolveAndCheckPath(filePath)
+
+        const figma = makeFigma()
+        if (!figma.exportImage) throw new Error('Image export is not available')
+
+        const nodeIds = ids && ids.length > 0
+          ? ids
+          : figma.currentPage.children.map((n: { id: string }) => n.id)
+        const fmt = ((format ?? 'PNG').toUpperCase()) as 'PNG' | 'JPG' | 'WEBP'
+        const data = await figma.exportImage(nodeIds, { scale: scale ?? 2, format: fmt })
+        if (!data || data.length === 0) throw new Error('No visible nodes to export')
+
+        await writeFile(outPath, data)
+        return ok({ saved: outPath, bytes: data.length, format: fmt, scale: scale ?? 2 })
       } catch (e) {
         return fail(e)
       }
