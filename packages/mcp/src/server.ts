@@ -1,7 +1,5 @@
-import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { isAbsolute, relative, resolve } from 'node:path'
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -13,16 +11,10 @@ import {
   parseFigFile,
   computeAllLayouts,
   SceneGraph,
-  renderNodesToImage,
-  SkiaRenderer,
-  collectFontKeys,
-  loadFont,
-  markFontLoaded,
-  setTextMeasurer
+  headlessRenderNodes
 } from '@open-pencil/core'
 
 import type { ToolDef, ParamDef, ParamType, ExportFormat } from '@open-pencil/core'
-import type { CanvasKit } from 'canvaskit-wasm'
 
 type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
 type McpResult = { content: McpContent[]; isError?: boolean }
@@ -61,35 +53,6 @@ function paramToZod(param: ParamDef): z.ZodTypeAny {
   return param.required ? schema : schema.optional()
 }
 
-let ckInstance: CanvasKit | null = null
-
-async function getCanvasKit(): Promise<CanvasKit> {
-  if (ckInstance) return ckInstance
-  const CanvasKitInit = (await import('canvaskit-wasm/full')).default
-  const ckPath = import.meta.resolve('canvaskit-wasm/full')
-  const binDir = new URL('.', ckPath).pathname
-  ckInstance = await CanvasKitInit({ locateFile: (file: string) => binDir + file })
-  return ckInstance
-}
-
-/** Pre-load bundled Inter font from disk into the font cache. */
-async function ensureInterFont(): Promise<void> {
-  const mcpDir = dirname(fileURLToPath(import.meta.url))
-  // Try multiple locations: installed package (../fonts/), project root (public/)
-  const candidates = [
-    join(mcpDir, '..', 'fonts', 'Inter-Regular.ttf'),
-    join(mcpDir, '..', '..', '..', 'public', 'Inter-Regular.ttf'),
-  ]
-  for (const interPath of candidates) {
-    if (existsSync(interPath)) {
-      const buf = await readFile(interPath)
-      const fontData = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
-      markFontLoaded('Inter', 'Regular', fontData)
-      return
-    }
-  }
-}
-
 export function createServer(version: string, options: CreateServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'open-pencil', version })
   const enableEval = options.enableEval ?? true
@@ -106,33 +69,8 @@ export function createServer(version: string, options: CreateServerOptions = {})
     const api = new FigmaAPI(g)
     if (currentPageId) api.currentPage = api.wrapNode(currentPageId)
     api.exportImage = async (nodeIds, opts) => {
-      // 1. Pre-load Inter font into cache so renderer.loadFonts() finds it
-      await ensureInterFont()
-
-      // 2. Create renderer and load fonts (picks up cached Inter)
-      const ck = await getCanvasKit()
-      const surface = ck.MakeSurface(1, 1)
-      if (!surface) throw new Error('Failed to create CanvasKit surface')
-      const renderer = new SkiaRenderer(ck, surface)
-      renderer.viewportWidth = 1
-      renderer.viewportHeight = 1
-      renderer.dpr = 1
-      await renderer.loadFonts()
-
-      // Load any additional fonts used by the exported nodes
       const pageId = currentPageId ?? g.getPages()[0].id
-      const fontKeys = collectFontKeys(g, nodeIds)
-      for (const [family, style] of fontKeys) {
-        await loadFont(family, style)
-      }
-
-      // 3. Use the renderer's ParagraphBuilder-based measurer for layout.
-      //    This guarantees measurement matches rendering (same fonts, same shaping).
-      setTextMeasurer((node, maxWidth) => renderer.measureTextNode(node, maxWidth))
-      computeAllLayouts(g)
-
-      // 4. Render with the same renderer that measured the text
-      return renderNodesToImage(ck, renderer, g, pageId, nodeIds, {
+      return headlessRenderNodes(g, pageId, nodeIds, {
         scale: opts.scale ?? 1,
         format: (opts.format ?? 'PNG') as ExportFormat
       })
