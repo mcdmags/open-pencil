@@ -13,6 +13,7 @@ import {
   SceneGraph,
   headlessRenderNodes
 } from '@open-pencil/core'
+import { exportImage } from '@open-pencil/core/tools'
 
 import type { ToolDef, ParamDef, ParamType, ExportFormat } from '@open-pencil/core'
 
@@ -183,21 +184,17 @@ export function createServer(version: string, options: CreateServerOptions = {})
     },
     async ({ path: filePath, ids, format, scale }: { path: string; ids?: string[]; format?: string; scale?: number }) => {
       try {
-        // Validate path BEFORE expensive render
         const outPath = resolveAndCheckPath(filePath)
-
-        const figma = makeFigma()
-        if (!figma.exportImage) throw new Error('Image export is not available')
-
-        const nodeIds = ids && ids.length > 0
-          ? ids
-          : figma.currentPage.children.map((n: { id: string }) => n.id)
-        const fmt = ((format ?? 'PNG').toUpperCase()) as 'PNG' | 'JPG' | 'WEBP'
-        const data = await figma.exportImage(nodeIds, { scale: scale ?? 2, format: fmt })
-        if (!data || data.length === 0) throw new Error('No visible nodes to export')
-
+        const result = await exportImage.execute(makeFigma(), {
+          ids,
+          format: format ?? 'PNG',
+          scale: scale ?? 2
+        })
+        if (result && 'error' in result) throw new Error(result.error as string)
+        const { base64 } = result as { base64: string }
+        const data = Buffer.from(base64, 'base64')
         await writeFile(outPath, data)
-        return ok({ saved: outPath, bytes: data.length, format: fmt, scale: scale ?? 2 })
+        return ok({ saved: outPath, bytes: data.length, format: (format ?? 'PNG').toUpperCase(), scale: scale ?? 2 })
       } catch (e) {
         return fail(e)
       }
