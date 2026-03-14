@@ -84,6 +84,9 @@ export function createServer(version: string, options: CreateServerOptions = {})
     const api = new FigmaAPI(g)
     if (currentPageId) api.currentPage = api.wrapNode(currentPageId)
     api.exportImage = async (nodeIds, opts) => {
+      // Compute layout before rendering — ensures flex/auto-layout is resolved
+      computeAllLayouts(g)
+
       const ck = await getCanvasKit()
       const surface = ck.MakeSurface(1, 1)
       if (!surface) throw new Error('Failed to create CanvasKit surface')
