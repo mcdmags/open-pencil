@@ -136,7 +136,21 @@ Press <kbd>⌘</kbd><kbd>J</kbd> to open the AI assistant. It has 87 tools that 
 
 ### MCP server
 
-Connect Claude Code, Cursor, Windsurf, or any MCP client to read and write `.fig` files headlessly. 90 tools (87 core + 3 file management). [Full docs →](https://openpencil.dev/reference/mcp-tools)
+Connect Claude Code, Cursor, Windsurf, or any MCP client to read and write `.fig` files headlessly. 90+ tools (87 core + file management + batch). [Full docs →](https://openpencil.dev/reference/mcp-tools)
+
+**Batch operations** — execute multiple tools in a single call with `$N` references between operations. Reduces 50+ round-trips to 1-3 for full mockups:
+
+```json
+{
+  "operations": [
+    { "tool": "create_shape", "args": { "type": "FRAME", "x": 0, "y": 0, "width": 440, "height": 580, "fill": "#161b22", "radius": 12 } },
+    { "tool": "create_shape", "args": { "type": "TEXT", "parent_id": "$0", "x": 32, "y": 32, "width": 200, "height": 30, "text": "Hello", "font_size": 24 } },
+    { "tool": "set_layout", "args": { "id": "$0", "direction": "VERTICAL", "spacing": 16, "padding": 24 } }
+  ]
+}
+```
+
+`create_shape` also accepts inline styles (`fill`, `stroke`, `radius`, `text`, `font_family`, `font_size`, `font_style`) to create styled nodes in one call.
 
 **Stdio** (Claude Code, Cursor, Windsurf):
 

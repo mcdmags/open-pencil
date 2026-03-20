@@ -13,6 +13,8 @@
 
 ### Features
 
+- `batch` MCP tool — execute multiple operations in a single call with `$N` references between operations (max 100). Stops on first error, returns partial results.
+- Inline style properties on `create_shape`: `fill`, `stroke`, `stroke_weight`, `radius`, `text`, `font_family`, `font_size`, `font_style` — create styled nodes in one call
 - Grid layout in AI chat — JSX renderer supports `grid`, `columns`, `rows`, `gap` props with child positioning (`colStart`, `rowStart`, `colSpan`, `rowSpan`) and auto-height grids
 - Configurable max output tokens in AI provider settings (default 16384)
 - Z.ai AI provider with GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 model families
