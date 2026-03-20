@@ -91,7 +91,7 @@ npx skills add open-pencil/skills@open-pencil
 
 Works with Claude Code, Cursor, Windsurf, Codex, and any agent that supports [skills](https://skills.sh). The skill covers the CLI, MCP tools, JSX rendering, eval, and the running app's automation bridge.
 
-## Tools (90)
+## Tools (91)
 
 ### Document
 
@@ -100,6 +100,7 @@ Works with Claude Code, Cursor, Windsurf, Codex, and any agent that supports [sk
 | `open_file` | Open a `.fig` file for editing |
 | `save_file` | Save the current document to a `.fig` file |
 | `new_document` | Create a new empty document |
+| `batch` | Execute multiple tools in a single call with `$N` references (max 100 ops) |
 
 ### Read
 
@@ -126,7 +127,7 @@ Works with Claude Code, Cursor, Windsurf, Codex, and any agent that supports [sk
 
 | Tool | Description |
 |------|-------------|
-| `create_shape` | Create a shape (`FRAME`, `RECTANGLE`, `ELLIPSE`, `TEXT`, `LINE`, `STAR`, `POLYGON`, `SECTION`) |
+| `create_shape` | Create a shape with optional inline styles (`fill`, `stroke`, `radius`, `text`, `font`) |
 | `create_vector` | Create a vector node from a path string |
 | `create_slice` | Create an export slice |
 | `create_page` | Create a new page |
