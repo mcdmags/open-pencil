@@ -136,6 +136,41 @@ describe('executeBatch', () => {
   })
 })
 
+describe('batch integration', () => {
+  test('full card mockup in a single batch call', async () => {
+    const { figma } = setup()
+    const result = await executeBatch(figma, [
+      { tool: 'create_shape', args: { type: 'FRAME', x: 0, y: 0, width: 440, height: 580, fill: '#161b22', radius: 12 } },
+      { tool: 'create_shape', args: { type: 'TEXT', parent_id: '$0', x: 32, y: 32, width: 200, height: 30, text: 'Dashboard', font_family: 'Inter', font_size: 24 } },
+      { tool: 'create_shape', args: { type: 'FRAME', parent_id: '$0', x: 32, y: 80, width: 376, height: 48, fill: '#238636', radius: 8 } },
+      { tool: 'create_shape', args: { type: 'TEXT', parent_id: '$2', x: 0, y: 0, width: 100, height: 20, text: 'Get Started', font_size: 14 } },
+      { tool: 'set_layout', args: { id: '$0', direction: 'VERTICAL', spacing: 16, padding: 24 } },
+      { tool: 'set_layout', args: { id: '$2', direction: 'HORIZONTAL', padding_horizontal: 16, padding_vertical: 8, align: 'CENTER' } }
+    ])
+    expect(result.error).toBeUndefined()
+    expect(result.results).toHaveLength(6)
+
+    // Verify parent-child: card frame has title and button as children
+    const cardId = (result.results[0] as any).id
+    const card = figma.getNodeById(cardId)!
+    expect(card.children.length).toBeGreaterThanOrEqual(2)
+
+    // Verify inline styles applied
+    expect(card.fills[0].color.r).toBeCloseTo(0.086, 1)  // #161b22
+    expect(card.cornerRadius).toBe(12)
+
+    // Verify button has label as child
+    const buttonId = (result.results[2] as any).id
+    const button = figma.getNodeById(buttonId)!
+    expect(button.children.some((c) => c.id === (result.results[3] as any).id)).toBe(true)
+
+    // Verify text content
+    const titleId = (result.results[1] as any).id
+    const title = figma.getNodeById(titleId)!
+    expect(title.characters).toBe('Dashboard')
+  })
+})
+
 describe('resolveRefs', () => {
   test('resolves $N exact match, embedded, nested objects, and arrays', () => {
     const results = [
