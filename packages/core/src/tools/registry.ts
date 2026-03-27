@@ -1,19 +1,49 @@
-import type { ToolDef } from './schema'
-
 import {
-  getSelection, getPageTree, getNode, findNodes, queryNodes, getComponents,
-  listPages, switchPage, getCurrentPage, pageBounds, selectNodes, listFonts,
-  getJsx, diffJsx
-} from './read'
+  analyzeColors,
+  analyzeTypography,
+  analyzeSpacing,
+  analyzeClusters,
+  diffCreate,
+  diffShow,
+  evalCode
+} from './analyze'
+import { calc } from './calc'
+import { designToTokens, designToComponentMap } from './codegen'
 import {
-  createShape, render, createComponent, createInstance,
-  createPage, createVector, createSlice, fetchIconsTool, insertIcon, searchIconsTool
+  createShape,
+  render,
+  createComponent,
+  createInstance,
+  createPage,
+  createVector,
+  createSlice,
+  fetchIconsTool,
+  insertIcon,
+  searchIconsTool
 } from './create'
+import { describe } from './describe'
 import {
-  setFill, setStroke, setEffects, updateNode, setLayout, setConstraints,
-  setRotation, setOpacity, setRadius, setMinMax, setText, setFont, setFontRange,
-  setTextResize, setVisible, setBlend, setLocked, setStrokeAlign,
-  setTextProperties, setLayoutChild, setImageFill
+  setFill,
+  setStroke,
+  setEffects,
+  updateNode,
+  setLayout,
+  setConstraints,
+  setRotation,
+  setOpacity,
+  setRadius,
+  setMinMax,
+  setText,
+  setFont,
+  setFontRange,
+  setTextResize,
+  setVisible,
+  setBlend,
+  setLocked,
+  setStrokeAlign,
+  setTextProperties,
+  setLayoutChild,
+  setImageFill
 } from './modify'
 import {
   deleteNode, cloneNode, renameNode, reparentNode, groupNodes, ungroupNode,
@@ -22,15 +52,33 @@ import {
   batchUpdate
 } from './structure'
 import {
-  listVariables, listCollections, getVariable, findVariables,
-  createVariable, setVariable, deleteVariable, bindVariable,
-  getCollection, createCollection, deleteCollection
+  listVariables,
+  listCollections,
+  getVariable,
+  findVariables,
+  createVariable,
+  setVariable,
+  deleteVariable,
+  bindVariable,
+  getCollection,
+  createCollection,
+  deleteCollection
 } from './variables'
 import {
-  booleanUnion, booleanSubtract, booleanIntersect, booleanExclude,
-  pathGet, pathSet, pathScale, pathFlip, pathMove,
-  viewportGet, viewportSet, viewportZoomToFit,
-  exportSvg, exportImage
+  booleanUnion,
+  booleanSubtract,
+  booleanIntersect,
+  booleanExclude,
+  pathGet,
+  pathSet,
+  pathScale,
+  pathFlip,
+  pathMove,
+  viewportGet,
+  viewportSet,
+  viewportZoomToFit,
+  exportSvg,
+  exportImage
 } from './vector'
 import {
   analyzeColors, analyzeTypography, analyzeSpacing, analyzeClusters,
@@ -73,7 +121,7 @@ export const CORE_TOOLS: ToolDef[] = [
   describe,
   calc,
   evalCode,
-  viewportZoomToFit,
+  viewportZoomToFit
 ]
 
 /**
@@ -166,7 +214,7 @@ export const EXTENDED_TOOLS: ToolDef[] = [
   diffShow,
   // Codegen
   designToTokens,
-  designToComponentMap,
+  designToComponentMap
 ]
 
 /** All tools combined — used by MCP server and CLI. */

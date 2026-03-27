@@ -25,15 +25,101 @@ import {
   RULER_BG_COLOR,
   RULER_TICK_COLOR,
   RULER_TEXT_COLOR,
-  DEFAULT_FONT_FAMILY
+  DEFAULT_FONT_FAMILY,
+  IS_BROWSER
 } from '../constants'
-
+import { computeAbsoluteBounds } from '../geometry'
 import { RenderProfiler } from '../profiler'
+import { drawAiOverlays as drawAiOverlaysFn } from './ai-overlays'
+import {
+  getCachedDropShadow as getCachedDropShadowFn,
+  getCachedBlur as getCachedBlurFn,
+  getCachedDecalBlur as getCachedDecalBlurFn,
+  getCachedMaskBlur as getCachedMaskBlurFn,
+  applyClippedBlur as applyClippedBlurFn
+} from './effects'
+import {
+  drawNodeFill as drawNodeFillFn,
+  applyFill as applyFillFn,
+  applyGradientFill as applyGradientFillFn,
+  applyImageFill as applyImageFillFn,
+  drawArc as drawArcFn
+} from './fills'
+import { LabelCache } from './label-cache'
+import {
+  drawSectionTitles as drawSectionTitlesFn,
+  drawComponentLabels as drawComponentLabelsFn
+} from './labels'
+import { drawNodeEditOverlay as drawNodeEditOverlayFn } from './node-edit-overlay'
+import {
+  drawHoverHighlight as drawHoverHighlightFn,
+  drawEnteredContainer as drawEnteredContainerFn,
+  drawSelection as drawSelectionFn,
+  drawNodeSelection as drawNodeSelectionFn,
+  drawSelectionLabels as drawSelectionLabelsFn,
+  drawParentFrameOutlines as drawParentFrameOutlinesFn,
+  drawNodeOutline as drawNodeOutlineFn,
+  drawGroupBounds as drawGroupBoundsFn,
+  getRotatedCorners as getRotatedCornersFn,
+  drawHandle as drawHandleFn,
+  drawSnapGuides as drawSnapGuidesFn,
+  drawMarquee as drawMarqueeFn,
+  drawFlashes as drawFlashesFn,
+  drawLayoutInsertIndicator as drawLayoutInsertIndicatorFn,
+  drawTextEditOverlay as drawTextEditOverlayFn
+} from './overlays'
+import {
+  drawPenOverlay as drawPenOverlayFn,
+  drawRemoteCursors as drawRemoteCursorsFn
+} from './pen-overlay'
+import { drawRulers as drawRulersFn } from './rulers'
+import {
+  renderNode as renderNodeFn,
+  renderSection as renderSectionFn,
+  renderComponentSet as renderComponentSetFn,
+  renderShape as renderShapeFn,
+  renderShapeUncached as renderShapeUncachedFn,
+  renderEffects as renderEffectsFn,
+  renderText as renderTextFn
+} from './scene'
+import {
+  makeNodeShapePath as makeNodeShapePathFn,
+  makePolygonPath as makePolygonPathFn,
+  makeRRect as makeRRectFn,
+  makeRRectWithSpread as makeRRectWithSpreadFn,
+  makeRRectWithOffset as makeRRectWithOffsetFn,
+  clipNodeShape as clipNodeShapeFn,
+  getVectorPaths as getVectorPathsFn,
+  getFillGeometry as getFillGeometryFn,
+  getStrokeGeometry as getStrokeGeometryFn
+} from './shapes'
+import {
+  drawNodeStroke as drawNodeStrokeFn,
+  drawStrokeWithAlign as drawStrokeWithAlignFn,
+  drawRRectStrokeWithAlign as drawRRectStrokeWithAlignFn,
+  drawIndividualSideStrokes as drawIndividualSideStrokesFn,
+  strokeNodeShape as strokeNodeShapeFn
+} from './strokes'
+import {
+  measureTextNode as measureTextNodeFn,
+  isNodeFontLoaded as isNodeFontLoadedFn,
+  buildTextPicture as buildTextPictureFn,
+  buildParagraph as buildParagraphFn
+} from './text'
 
-import type { SceneNode, SceneGraph, Fill, Stroke } from '../scene-graph'
+import type { EditorState } from '../editor/types'
+import type {
+  SceneNode,
+  SceneGraph,
+  Fill,
+  Stroke,
+  VectorVertex,
+  VectorRegion
+} from '../scene-graph'
 import type { SnapGuide } from '../snap'
 import type { TextEditor } from '../text-editor'
 import type { Color, Rect, Vector } from '../types'
+import type { NodeEditOverlayState } from './node-edit-overlay'
 import type {
   Image as CKImage,
   Path,
@@ -150,9 +236,26 @@ export interface RenderOverlays {
       tangentEnd: Vector
     }>
     dragTangent: Vector | null
+    oppositeDragTangent?: Vector | null
     closingToFirst: boolean
+    pendingClose?: boolean
     cursorX?: number
     cursorY?: number
+  } | null
+  nodeEditState?: {
+    nodeId: string
+    vertices: VectorVertex[]
+    segments: Array<{
+      start: number
+      end: number
+      tangentStart: Vector
+      tangentEnd: Vector
+    }>
+    regions: VectorRegion[]
+    selectedVertexIndices: Set<number>
+    /** Set of selected handles as "segIdx:tangentField" strings */
+    selectedHandles?: Set<string>
+    hoveredHandleInfo?: { segmentIndex: number; tangentField: 'tangentStart' | 'tangentEnd' } | null
   } | null
   remoteCursors?: Array<{
     name: string
@@ -205,6 +308,7 @@ export class SkiaRenderer {
   rulerBadgePaint: Paint
   rulerLabelPaint: Paint
   penPathPaint: Paint
+  penLiveStrokePaint: Paint
   penHandlePaint: Paint
   penVertexFill: Paint
   penVertexStroke: Paint
@@ -360,11 +464,19 @@ export class SkiaRenderer {
     this.rulerLabelPaint.setColor(ck.Color4f(1, 1, 1, 1))
     this.rulerLabelPaint.setAntiAlias(true)
 
+    // Technical outline: 1px grey (same as node-edit techStroke)
     this.penPathPaint = new ck.Paint()
     this.penPathPaint.setStyle(ck.PaintStyle.Stroke)
-    this.penPathPaint.setStrokeWidth(PEN_PATH_STROKE_WIDTH)
-    this.penPathPaint.setColor(this.selColor())
+    this.penPathPaint.setStrokeWidth(1)
+    this.penPathPaint.setColor(ck.Color4f(0.698, 0.698, 0.698, 1))
     this.penPathPaint.setAntiAlias(true)
+
+    // Live stroke preview: 2px black (actual object style)
+    this.penLiveStrokePaint = new ck.Paint()
+    this.penLiveStrokePaint.setStyle(ck.PaintStyle.Stroke)
+    this.penLiveStrokePaint.setStrokeWidth(PEN_PATH_STROKE_WIDTH)
+    this.penLiveStrokePaint.setColor(ck.Color4f(0, 0, 0, 1))
+    this.penLiveStrokePaint.setAntiAlias(true)
 
     this.penHandlePaint = new ck.Paint()
     this.penHandlePaint.setStyle(ck.PaintStyle.Stroke)
@@ -377,9 +489,10 @@ export class SkiaRenderer {
     this.penVertexFill.setColor(ck.WHITE)
     this.penVertexFill.setAntiAlias(true)
 
+    // Vertex circle outline: 1px blue
     this.penVertexStroke = new ck.Paint()
     this.penVertexStroke.setStyle(ck.PaintStyle.Stroke)
-    this.penVertexStroke.setStrokeWidth(PEN_PATH_STROKE_WIDTH)
+    this.penVertexStroke.setStrokeWidth(1)
     this.penVertexStroke.setColor(this.selColor())
     this.penVertexStroke.setAntiAlias(true)
   }
@@ -416,8 +529,8 @@ export class SkiaRenderer {
     this.fontsLoaded = true
     this.invalidateAllPictures()
 
-    void ensureCJKFallback().then((family) => {
-      if (family) this.invalidateAllPictures()
+    void ensureCJKFallback().then((families) => {
+      if (families.length > 0) this.invalidateAllPictures()
     })
   }
 
@@ -671,6 +784,53 @@ export class SkiaRenderer {
     this.worldViewport = prevViewport
   }
 
+  renderFromEditorState(
+    state: EditorState,
+    graph: SceneGraph,
+    textEditor: unknown,
+    viewportWidth: number,
+    viewportHeight: number,
+    showRulers = true
+  ): void {
+    const extendedState = state as EditorState & {
+      nodeEditState?: RenderOverlays['nodeEditState']
+    }
+    this.dpr = IS_BROWSER ? window.devicePixelRatio || 1 : 1
+    this.panX = state.panX
+    this.panY = state.panY
+    this.zoom = state.zoom
+    this.viewportWidth = viewportWidth
+    this.viewportHeight = viewportHeight
+    this.showRulers = showRulers
+    this.pageColor = state.pageColor
+    this.pageId = state.currentPageId
+    this.render(
+      graph,
+      state.selectedIds,
+      {
+        hoveredNodeId: state.hoveredNodeId,
+        enteredContainerId: state.enteredContainerId,
+        editingTextId: state.editingTextId,
+        textEditor: textEditor as RenderOverlays['textEditor'],
+        marquee: state.marquee,
+        snapGuides: state.snapGuides,
+        rotationPreview: state.rotationPreview,
+        dropTargetId: state.dropTargetId,
+        layoutInsertIndicator: state.layoutInsertIndicator,
+        penState: state.penState
+          ? ({
+              ...state.penState,
+              cursorX: state.penCursorX ?? undefined,
+              cursorY: state.penCursorY ?? undefined
+            } as RenderOverlays['penState'])
+          : null,
+        nodeEditState: extendedState.nodeEditState ?? null,
+        remoteCursors: state.remoteCursors
+      },
+      state.sceneVersion
+    )
+  }
+
   render(
     graph: SceneGraph,
     selectedIds: Set<string>,
@@ -695,7 +855,8 @@ export class SkiaRenderer {
     const hasVolatileOverlays =
       overlays.dropTargetId != null ||
       overlays.rotationPreview != null ||
-      overlays.editingTextId != null
+      overlays.editingTextId != null ||
+      overlays.nodeEditState != null
 
     const canUsePicture =
       !hasVolatileOverlays &&
@@ -760,6 +921,7 @@ export class SkiaRenderer {
     this.drawSnapGuides(canvas, overlays.snapGuides)
     this.drawMarquee(canvas, overlays.marquee)
     this.drawLayoutInsertIndicator(canvas, overlays.layoutInsertIndicator)
+    this.drawNodeEditOverlay(canvas, graph, overlays.nodeEditState)
     this.drawPenOverlay(canvas, overlays.penState)
     this.drawRemoteCursors(canvas, graph, overlays.remoteCursors)
     p.beginPhase('render:rulers')
@@ -783,9 +945,24 @@ export class SkiaRenderer {
     const prevViewport = this.worldViewport
     this.worldViewport = { x: -1e6, y: -1e6, w: 2e6, h: 2e6 }
     const recorder = new this.ck.PictureRecorder()
-    const bounds = this.ck.LTRBRect(-1e6, -1e6, 1e6, 1e6)
-    const recCanvas = recorder.beginRecording(bounds)
     const pageNode = graph.getNode(this.pageId ?? graph.rootId)
+    const sceneNodes = pageNode
+      ? pageNode.childIds
+          .map((childId) => graph.getNode(childId))
+          .filter((node): node is SceneNode => node != null)
+      : []
+    const sceneBounds =
+      sceneNodes.length > 0
+        ? computeAbsoluteBounds(sceneNodes, (id) => graph.getAbsolutePosition(id))
+        : { x: 0, y: 0, width: 1, height: 1 }
+    const padding = 1024
+    const bounds = this.ck.LTRBRect(
+      sceneBounds.x - padding,
+      sceneBounds.y - padding,
+      sceneBounds.x + sceneBounds.width + padding,
+      sceneBounds.y + sceneBounds.height + padding
+    )
+    const recCanvas = recorder.beginRecording(bounds)
     if (pageNode) {
       for (const childId of pageNode.childIds) {
         this.renderNode(recCanvas, graph, childId, {}, 0, 0)
@@ -897,6 +1074,7 @@ export class SkiaRenderer {
     this.rulerBadgePaint.delete()
     this.rulerLabelPaint.delete()
     this.penPathPaint.delete()
+    this.penLiveStrokePaint.delete()
     this.penHandlePaint.delete()
     this.penVertexFill.delete()
     this.penVertexStroke.delete()
@@ -915,7 +1093,11 @@ export class SkiaRenderer {
 
   // --- Delegation methods ---
 
-  private drawHoverHighlight(canvas: Canvas, graph: SceneGraph, hoveredNodeId?: string | null): void {
+  private drawHoverHighlight(
+    canvas: Canvas,
+    graph: SceneGraph,
+    hoveredNodeId?: string | null
+  ): void {
     drawHoverHighlightFn(this, canvas, graph, hoveredNodeId)
   }
 
@@ -968,7 +1150,10 @@ export class SkiaRenderer {
     drawAiOverlaysFn(this, canvas, graph)
   }
 
-  private drawLayoutInsertIndicator(canvas: Canvas, indicator?: RenderOverlays['layoutInsertIndicator']): void {
+  private drawLayoutInsertIndicator(
+    canvas: Canvas,
+    indicator?: RenderOverlays['layoutInsertIndicator']
+  ): void {
     drawLayoutInsertIndicatorFn(this, canvas, indicator)
   }
 
@@ -976,11 +1161,23 @@ export class SkiaRenderer {
     drawTextEditOverlayFn(this, canvas, node, editor)
   }
 
+  private drawNodeEditOverlay(
+    canvas: Canvas,
+    graph: SceneGraph,
+    editState: RenderOverlays['nodeEditState']
+  ): void {
+    drawNodeEditOverlayFn(this, canvas, graph, editState as NodeEditOverlayState | null)
+  }
+
   private drawPenOverlay(canvas: Canvas, penState: RenderOverlays['penState']): void {
     drawPenOverlayFn(this, canvas, penState)
   }
 
-  private drawRemoteCursors(canvas: Canvas, graph: SceneGraph, cursors?: RenderOverlays['remoteCursors']): void {
+  private drawRemoteCursors(
+    canvas: Canvas,
+    graph: SceneGraph,
+    cursors?: RenderOverlays['remoteCursors']
+  ): void {
     drawRemoteCursorsFn(this, canvas, graph, cursors)
   }
 
@@ -996,7 +1193,14 @@ export class SkiaRenderer {
     drawComponentLabelsFn(this, canvas, graph)
   }
 
-  renderNode(canvas: Canvas, graph: SceneGraph, nodeId: string, overlays: RenderOverlays, parentAbsX = 0, parentAbsY = 0): void {
+  renderNode(
+    canvas: Canvas,
+    graph: SceneGraph,
+    nodeId: string,
+    overlays: RenderOverlays,
+    parentAbsX = 0,
+    parentAbsY = 0
+  ): void {
     renderNodeFn(this, canvas, graph, nodeId, overlays, parentAbsX, parentAbsY)
   }
 
@@ -1016,7 +1220,14 @@ export class SkiaRenderer {
     renderShapeUncachedFn(this, canvas, node, graph)
   }
 
-  renderEffects(canvas: Canvas, node: SceneNode, rect: Float32Array, hasRadius: boolean, pass: 'behind' | 'front', shadowShapeChild?: SceneNode | null): void {
+  renderEffects(
+    canvas: Canvas,
+    node: SceneNode,
+    rect: Float32Array,
+    hasRadius: boolean,
+    pass: 'behind' | 'front',
+    shadowShapeChild?: SceneNode | null
+  ): void {
     renderEffectsFn(this, canvas, node, rect, hasRadius, pass, shadowShapeChild)
   }
 
@@ -1048,15 +1259,30 @@ export class SkiaRenderer {
     drawNodeStrokeFn(this, canvas, node, rect, hasRadius)
   }
 
-  drawStrokeWithAlign(canvas: Canvas, node: SceneNode, rect: Float32Array, hasRadius: boolean, align: 'INSIDE' | 'CENTER' | 'OUTSIDE'): void {
+  drawStrokeWithAlign(
+    canvas: Canvas,
+    node: SceneNode,
+    rect: Float32Array,
+    hasRadius: boolean,
+    align: 'INSIDE' | 'CENTER' | 'OUTSIDE'
+  ): void {
     drawStrokeWithAlignFn(this, canvas, node, rect, hasRadius, align)
   }
 
-  drawRRectStrokeWithAlign(canvas: Canvas, rrect: Float32Array, node: SceneNode, stroke: Stroke): void {
+  drawRRectStrokeWithAlign(
+    canvas: Canvas,
+    rrect: Float32Array,
+    node: SceneNode,
+    stroke: Stroke
+  ): void {
     drawRRectStrokeWithAlignFn(this, canvas, rrect, node, stroke)
   }
 
-  drawIndividualSideStrokes(canvas: Canvas, node: SceneNode, align: 'INSIDE' | 'CENTER' | 'OUTSIDE'): void {
+  drawIndividualSideStrokes(
+    canvas: Canvas,
+    node: SceneNode,
+    align: 'INSIDE' | 'CENTER' | 'OUTSIDE'
+  ): void {
     drawIndividualSideStrokesFn(this, canvas, node, align)
   }
 
@@ -1116,7 +1342,13 @@ export class SkiaRenderer {
     return getCachedMaskBlurFn(this, sigma)
   }
 
-  applyClippedBlur(canvas: Canvas, node: SceneNode, rect: Float32Array, hasRadius: boolean, sigma: number): void {
+  applyClippedBlur(
+    canvas: Canvas,
+    node: SceneNode,
+    rect: Float32Array,
+    hasRadius: boolean,
+    sigma: number
+  ): void {
     applyClippedBlurFn(this, canvas, node, rect, hasRadius, sigma)
   }
 }

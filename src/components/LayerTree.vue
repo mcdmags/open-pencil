@@ -1,28 +1,19 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
 import { TreeRoot, TreeItem, ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal } from 'reka-ui'
 
-import { useInlineRename } from '@/composables/use-inline-rename'
-
-import IconCircle from '~icons/lucide/circle'
-import IconComponent from '~icons/lucide/diamond'
-import IconComponentSet from '~icons/lucide/component'
-import IconColumns from '~icons/lucide/columns-3'
-import IconFrame from '~icons/lucide/frame'
-import IconGrid from '~icons/lucide/grid-3x3'
-import IconGroup from '~icons/lucide/group'
-
-import IconMinus from '~icons/lucide/minus'
-import IconPenTool from '~icons/lucide/pen-tool'
-import IconRows from '~icons/lucide/rows-3'
-import IconSection from '~icons/lucide/layout-grid'
-import IconSquare from '~icons/lucide/square'
-import IconType from '~icons/lucide/type'
-
+import {
+  LayerTreeRoot,
+  LayerTreeItem,
+  useI18n,
+  useInlineRename,
+  useLayerDrag
+} from '@open-pencil/vue'
 import { useEditorStore } from '@/stores/editor'
-import NodeContextMenuContent from './NodeContextMenuContent.vue'
+import { nodeIcon, COMPONENT_TYPES } from '@/utils/layer-icons'
+import CanvasMenu from './CanvasMenu.vue'
+import Tip from './ui/Tip.vue'
 
+const INDENT = 16
 const store = useEditorStore()
 const rename = useInlineRename((id, name) => store.renameNode(id, name))
 
@@ -333,44 +324,59 @@ function updateDropTarget(ev: PointerEvent) {
 </script>
 
 <template>
-  <ContextMenuRoot :modal="false">
-    <ContextMenuTrigger as-child @contextmenu="onLayerRightClick">
-      <div ref="listRef" class="relative scrollbar-thin flex-1 overflow-y-auto px-1">
-        <TreeRoot
-          :key="treeKey"
-          v-slot="{ flattenItems }"
-          :items="items"
-          :get-key="(v: LayerNode) => v.id"
-          :get-children="(v: LayerNode) => v.children"
-          v-model:expanded="expanded"
-        >
-          <div
-            v-for="item in flattenItems"
-            :key="item._id"
-            :data-node-id="item.value.id"
-            :data-level="item.level"
+  <LayerTreeRoot
+    v-slot="{ items, expanded, treeKey, getKey, getChildren }"
+    :indent-per-level="INDENT"
+  >
+    <ContextMenuRoot :modal="false">
+      <ContextMenuTrigger as-child @contextmenu="onLayerRightClick">
+        <div class="relative scrollbar-thin flex-1 overflow-y-auto px-1">
+          <TreeRoot
+            :key="treeKey"
+            v-slot="{ flattenItems }"
+            :expanded="expanded"
+            :items="items"
+            :get-key="getKey"
+            :get-children="getChildren"
           >
-            <TreeItem
-              v-slot="{ isExpanded }"
-              v-bind="item.bind"
-              as-child
-              @select="onSelect"
-              @toggle="
-                (e: CustomEvent) => {
-                  if (e.detail.originalEvent?.type === 'click') e.preventDefault()
-                }
-              "
+            <LayerTreeItem
+              v-for="item in flattenItems"
+              :key="item._id"
+              v-slot="{
+                node,
+                isSelected,
+                padLeft,
+                select: selectNode,
+                toggleExpand,
+                toggleVisibility,
+                toggleLock
+              }"
+              :node="item.value"
+              :level="item.level"
+              :has-children="item.hasChildren"
             >
-              <div
-                v-if="rename.editingId.value === item.value.id"
-                class="flex w-full items-center gap-1 py-1"
-                :style="{ paddingLeft: `${8 + (item.level - 1) * 16}px` }"
+              <TreeItem
+                v-slot="{ isExpanded }"
+                :value="item.value"
+                :level="item.level"
+                as-child
+                @select="
+                  (e: CustomEvent) => {
+                    e.preventDefault()
+                    selectNode(!!e.detail.originalEvent?.shiftKey)
+                  }
+                "
+                @toggle="
+                  (e: CustomEvent) => {
+                    if (e.detail.originalEvent?.type === 'click') e.preventDefault()
+                  }
+                "
               >
-                <span
-                  v-if="item.hasChildren"
-                  class="flex w-4 shrink-0 cursor-pointer items-center justify-center text-muted transition-transform hover:text-surface"
-                  :class="isExpanded ? 'rotate-90' : 'rotate-0'"
-                  @click.stop="toggleExpand(item.value.id)"
+                <!-- Rename mode -->
+                <div
+                  v-if="rename.editingId.value === node.id"
+                  class="flex w-full items-center gap-1 py-1"
+                  :style="{ paddingLeft: padLeft }"
                 >
                   <icon-lucide-chevron-right class="size-3" />
                 </span>
@@ -489,15 +495,113 @@ function updateDropTarget(ev: PointerEvent) {
           </div>
         </TreeRoot>
 
-        <div
-          v-if="dragging && indicatorY >= 0"
-          class="pointer-events-none absolute right-1 left-1 h-0.5 bg-accent"
-          :style="{ top: `${indicatorY}px`, marginLeft: `${indicatorDepth * 16}px` }"
-        />
-      </div>
-    </ContextMenuTrigger>
-    <ContextMenuPortal>
-      <NodeContextMenuContent />
-    </ContextMenuPortal>
-  </ContextMenuRoot>
+                <!-- Normal row -->
+                <button
+                  v-else
+                  data-test-id="layers-item"
+                  class="group/row relative flex w-full cursor-pointer items-center gap-1 rounded border-none py-1 pr-1 text-left text-xs"
+                  :class="[
+                    isSelected
+                      ? 'bg-accent text-white'
+                      : 'bg-transparent text-surface hover:bg-hover',
+                    draggingId === node.id ? 'opacity-30' : '',
+                    instructionTargetId === node.id && instruction?.type === 'make-child'
+                      ? 'ring-2 ring-accent ring-inset'
+                      : '',
+                    !node.visible ? 'opacity-50' : ''
+                  ]"
+                  :style="{ paddingLeft: padLeft }"
+                  @dblclick="rename.start(node.id, node.name)"
+                >
+                  <span
+                    v-if="item.hasChildren"
+                    class="flex w-4 shrink-0 cursor-pointer items-center justify-center text-muted transition-transform hover:text-surface"
+                    :class="isExpanded ? 'rotate-90' : 'rotate-0'"
+                    @click.stop="toggleExpand"
+                  >
+                    <icon-lucide-chevron-right class="size-3" />
+                  </span>
+                  <span v-else class="w-4 shrink-0" />
+
+                  <component
+                    :is="nodeIcon(node)"
+                    class="size-3 shrink-0"
+                    :class="
+                      COMPONENT_TYPES.has(node.type) ? 'text-component opacity-100' : 'opacity-70'
+                    "
+                  />
+                  <span class="min-w-0 flex-1 truncate">{{ node.name }}</span>
+
+                  <span
+                    class="flex shrink-0 items-center gap-0.5"
+                    :class="
+                      !node.locked && node.visible ? 'opacity-0 group-hover/row:opacity-100' : ''
+                    "
+                  >
+                    <Tip :label="node.locked ? t.unlock : t.lock">
+                      <span
+                        class="flex size-4 items-center justify-center rounded hover:bg-white/15"
+                        @pointerdown.stop
+                        @click.stop="toggleLock"
+                      >
+                        <icon-lucide-lock
+                          v-if="node.locked"
+                          class="size-3"
+                          :class="isSelected ? 'text-white' : 'text-surface'"
+                        />
+                        <icon-lucide-unlock
+                          v-else
+                          class="size-3 opacity-0 group-hover/row:opacity-100"
+                          :class="isSelected ? 'text-white/80' : 'text-surface/70'"
+                        />
+                      </span>
+                    </Tip>
+                    <Tip :label="node.visible ? t.hide : t.show">
+                      <span
+                        class="flex size-4 items-center justify-center rounded hover:bg-white/15"
+                        @pointerdown.stop
+                        @click.stop="toggleVisibility"
+                      >
+                        <icon-lucide-eye-off
+                          v-if="!node.visible"
+                          class="size-3"
+                          :class="isSelected ? 'text-white' : 'text-surface'"
+                        />
+                        <icon-lucide-eye
+                          v-else
+                          class="size-3 opacity-0 group-hover/row:opacity-100"
+                          :class="isSelected ? 'text-white/80' : 'text-surface/70'"
+                        />
+                      </span>
+                    </Tip>
+                  </span>
+
+                  <!-- DnD indicator -->
+                  <div
+                    v-if="
+                      instructionTargetId === node.id &&
+                      instruction &&
+                      instruction.type !== 'make-child'
+                    "
+                    class="pointer-events-none absolute h-0.5 bg-accent"
+                    :class="{
+                      'bottom-0': instruction.type === 'reorder-below',
+                      'top-0': instruction.type === 'reorder-above'
+                    }"
+                    :style="{
+                      left: `${(item.level - 1) * INDENT}px`,
+                      width: `calc(100% - ${(item.level - 1) * INDENT}px)`
+                    }"
+                  />
+                </button>
+              </TreeItem>
+            </LayerTreeItem>
+          </TreeRoot>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuPortal>
+        <CanvasMenu />
+      </ContextMenuPortal>
+    </ContextMenuRoot>
+  </LayerTreeRoot>
 </template>

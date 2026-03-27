@@ -1,27 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, h, type Component } from 'vue'
+import { type Component } from 'vue'
 import {
-  DialogRoot,
-  DialogPortal,
-  DialogOverlay,
-  DialogContent,
-  DialogTitle,
   DialogClose,
-  TabsRoot,
-  TabsList,
-  TabsTrigger,
+  DialogContent,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
   TabsContent,
-  EditableRoot,
-  EditableArea,
-  EditableInput,
-  EditablePreview
+  TabsList,
+  TabsRoot,
+  TabsTrigger
 } from 'reka-ui'
-import { useVueTable, getCoreRowModel, FlexRender, type ColumnDef } from '@tanstack/vue-table'
+import { FlexRender } from '@tanstack/vue-table'
 
-import IconPalette from '~icons/lucide/palette'
+import { useI18n, useVariablesEditor } from '@open-pencil/vue'
+
 import IconHash from '~icons/lucide/hash'
-import IconType from '~icons/lucide/type'
+import IconPalette from '~icons/lucide/palette'
 import IconToggleLeft from '~icons/lucide/toggle-left'
+import IconType from '~icons/lucide/type'
 import IconX from '~icons/lucide/x'
 import ColorInput from './ColorInput.vue'
 import { colorToHexRaw, parseColor, randomHex } from '@open-pencil/core'
@@ -29,40 +27,16 @@ import { useEditorStore } from '@/stores/editor'
 import type { Variable, VariableCollection, VariableValue, Color } from '@open-pencil/core'
 
 const open = defineModel<boolean>('open', { default: false })
-const store = useEditorStore()
-const searchTerm = ref('')
+const cls = useDialogUI({ content: 'flex h-[75vh] w-[800px] max-w-[90vw] flex-col' })
 
-const collections = computed(() => {
-  void store.state.sceneVersion
-  return [...store.graph.variableCollections.values()]
-})
-
-const activeTab = ref(collections.value[0]?.id ?? '')
-watch(collections, (cols) => {
-  if (!activeTab.value && cols[0]) activeTab.value = cols[0].id
-})
-
-const editingCollectionId = ref<string | null>(null)
-const collectionInputRefs = new Map<string, HTMLInputElement>()
-const pendingCollectionFocusId = ref<string | null>(null)
-
-function setCollectionInputRef(id: string, el: HTMLInputElement | null) {
-  if (el) collectionInputRefs.set(id, el)
-  else collectionInputRefs.delete(id)
-
-  if (el && pendingCollectionFocusId.value === id) {
-    pendingCollectionFocusId.value = null
-    void nextTick(() => {
-      el.focus()
-      el.select()
-    })
-  }
+const variableTypeIcons: Record<string, Component> = {
+  COLOR: IconPalette,
+  FLOAT: IconHash,
+  STRING: IconType,
+  BOOLEAN: IconToggleLeft
 }
 
-function startRenameCollection(id: string) {
-  editingCollectionId.value = id
-  pendingCollectionFocusId.value = id
-}
+const { dialogs } = useI18n()
 
 function commitRenameCollection(id: string, input: HTMLInputElement) {
   if (editingCollectionId.value !== id) return
@@ -386,14 +360,13 @@ const table = useVueTable({
 <template>
   <DialogRoot v-model:open="open">
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-40 bg-black/50" />
-      <DialogContent
-        data-test-id="variables-dialog"
-        class="fixed top-1/2 left-1/2 z-50 flex h-[75vh] w-[800px] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-panel shadow-2xl outline-none"
-      >
-        <div v-if="collections.length === 0" class="flex flex-1 flex-col">
+      <DialogOverlay :class="cls.overlay" />
+      <DialogContent data-test-id="variables-dialog" :class="cls.content">
+        <div v-if="!ctx.hasCollections" class="flex flex-1 flex-col">
           <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-            <DialogTitle class="text-sm font-semibold text-surface">Local variables</DialogTitle>
+            <DialogTitle class="text-sm font-semibold text-surface">{{
+              dialogs.localVariables
+            }}</DialogTitle>
             <DialogClose
               class="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-muted hover:bg-hover hover:text-surface"
             >
@@ -402,39 +375,41 @@ const table = useVueTable({
           </div>
           <div class="flex flex-1 items-center justify-center">
             <div class="text-center">
-              <p class="text-sm text-muted">No variable collections</p>
+              <p class="text-sm text-muted">{{ dialogs.noVariableCollections }}</p>
               <button
                 data-test-id="variables-create-collection"
                 class="mt-2 cursor-pointer rounded bg-hover px-3 py-1.5 text-xs text-surface hover:bg-border"
-                @click="addCollection"
+                @click="ctx.addCollection"
               >
-                Create collection
+                {{ dialogs.createCollection }}
               </button>
             </div>
           </div>
         </div>
 
         <template v-else>
-          <TabsRoot v-model="activeTab" class="flex flex-1 flex-col overflow-hidden">
-            <!-- Top bar -->
+          <TabsRoot
+            v-model="ctx.activeCollectionId.value"
+            class="flex flex-1 flex-col overflow-hidden"
+          >
             <div class="flex shrink-0 items-center border-b border-border">
               <TabsList class="flex flex-1 gap-0.5 overflow-x-auto px-3 py-1">
-                <template v-for="col in collections" :key="col.id">
+                <template v-for="col in ctx.collections.value" :key="col.id">
                   <input
-                    v-if="editingCollectionId === col.id"
-                    :ref="(el) => setCollectionInputRef(col.id, el as HTMLInputElement | null)"
+                    v-if="ctx.editingCollectionId.value === col.id"
+                    :ref="(el) => ctx.setCollectionInputRef(col.id, el as HTMLInputElement | null)"
                     class="w-24 rounded border border-accent bg-input px-2 py-0.5 text-xs text-surface outline-none"
                     :value="col.name"
-                    @blur="commitRenameCollection(col.id, $event.target as HTMLInputElement)"
+                    @blur="ctx.commitRenameCollection(col.id, $event.target as HTMLInputElement)"
                     @keydown.enter="($event.target as HTMLInputElement).blur()"
-                    @keydown.escape="editingCollectionId = null"
+                    @keydown.escape="ctx.editingCollectionId.value = null"
                   />
                   <TabsTrigger
                     v-else
                     :value="col.id"
                     data-test-id="variables-collection-tab"
                     class="cursor-pointer rounded border-none px-2.5 py-1 text-xs whitespace-nowrap text-muted data-[state=active]:bg-hover data-[state=active]:text-surface"
-                    @dblclick="startRenameCollection(col.id)"
+                    @dblclick="ctx.startRenameCollection(col.id)"
                   >
                     {{ col.name }}
                   </TabsTrigger>
@@ -445,20 +420,21 @@ const table = useVueTable({
                 <div class="flex items-center gap-1 rounded border border-border px-2 py-0.5">
                   <icon-lucide-search class="size-3 text-muted" />
                   <input
-                    v-model="searchTerm"
+                    v-model="ctx.searchTerm.value"
                     data-test-id="variables-search-input"
                     class="w-24 border-none bg-transparent text-xs text-surface outline-none placeholder:text-muted"
-                    placeholder="Search"
+                    :placeholder="dialogs.search"
                   />
                 </div>
-                <button
-                  data-test-id="variables-add-collection"
-                  class="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-muted hover:bg-hover hover:text-surface"
-                  title="Add collection"
-                  @click="addCollection"
-                >
-                  <icon-lucide-folder-plus class="size-3.5" />
-                </button>
+                <Tip :label="dialogs.createCollection">
+                  <button
+                    data-test-id="variables-add-collection"
+                    class="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-muted hover:bg-hover hover:text-surface"
+                    @click="ctx.addCollection"
+                  >
+                    <icon-lucide-folder-plus class="size-3.5" />
+                  </button>
+                </Tip>
                 <DialogClose
                   class="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-muted hover:bg-hover hover:text-surface"
                 >
@@ -467,9 +443,8 @@ const table = useVueTable({
               </div>
             </div>
 
-            <!-- Table -->
             <TabsContent
-              v-for="col in collections"
+              v-for="col in ctx.collections.value"
               :key="col.id"
               :value="col.id"
               class="flex flex-1 flex-col overflow-hidden outline-none"
@@ -477,11 +452,11 @@ const table = useVueTable({
               <div class="flex-1 overflow-auto">
                 <table
                   class="w-full border-collapse"
-                  :style="{ width: `${table.getCenterTotalSize()}px` }"
+                  :style="{ width: `${ctx.table.getCenterTotalSize()}px` }"
                 >
                   <thead class="sticky top-0 z-10 bg-panel">
                     <tr
-                      v-for="headerGroup in table.getHeaderGroups()"
+                      v-for="headerGroup in ctx.table.getHeaderGroups()"
                       :key="headerGroup.id"
                       class="border-b border-border"
                     >
@@ -496,7 +471,6 @@ const table = useVueTable({
                           :render="header.column.columnDef.header"
                           :props="header.getContext()"
                         />
-                        <!-- Resize handle -->
                         <div
                           v-if="header.column.getCanResize()"
                           class="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none select-none"
@@ -514,7 +488,7 @@ const table = useVueTable({
                   </thead>
                   <tbody>
                     <tr
-                      v-for="row in table.getRowModel().rows"
+                      v-for="row in ctx.table.getRowModel().rows"
                       :key="row.id"
                       data-test-id="variable-row"
                       class="group border-b border-border/30 hover:bg-hover/50"
@@ -535,11 +509,10 @@ const table = useVueTable({
                 </table>
               </div>
 
-              <!-- Footer -->
               <button
                 data-test-id="variables-add-variable"
                 class="flex w-full shrink-0 cursor-pointer items-center gap-1.5 border-t border-border bg-transparent px-4 py-2 text-xs text-muted hover:bg-hover hover:text-surface"
-                @click="addVariable"
+                @click="ctx.addVariable"
               >
                 <icon-lucide-plus class="size-3.5" />
                 Create variable

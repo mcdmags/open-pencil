@@ -1,5 +1,5 @@
 import { DEFAULT_FONT_SIZE, DEFAULT_FONT_FAMILY } from '../constants'
-import { isFontLoaded, getCJKFallbackFamily } from '../fonts'
+import { isFontLoaded, getCJKFallbackFamilies } from '../fonts'
 
 import type { SceneNode } from '../scene-graph'
 import type { CanvasKit, FontWeight, Paragraph, TypefaceFontProvider } from 'canvaskit-wasm'
@@ -28,13 +28,7 @@ export function measureTextNode(
   if (node.type !== 'TEXT' || !node.text) return null
 
   const paragraph = buildParagraph(r, node)
-  const layoutWidth =
-    maxWidth !== undefined
-      ? maxWidth
-      : (node.textAutoResize === 'WIDTH_AND_HEIGHT'
-          ? 1e6
-          : node.width || 1e6)
-  paragraph.layout(layoutWidth)
+  paragraph.layout(resolveParagraphLayoutWidth(node, maxWidth))
   const width = paragraph.getLongestLine()
   const height = paragraph.getHeight()
   paragraph.delete()
@@ -50,7 +44,7 @@ export function buildTextPicture(r: TextRenderer, node: SceneNode): Uint8Array |
   const bounds = ck.LTRBRect(0, 0, node.width || 1e6, node.height || 1e6)
   const recCanvas = recorder.beginRecording(bounds)
 
-  const paragraph = buildParagraph(r, node, undefined, { halfLeading: true })
+  const paragraph = buildParagraph(r, node)
   recCanvas.drawParagraph(paragraph, 0, 0)
   paragraph.delete()
 
@@ -60,6 +54,12 @@ export function buildTextPicture(r: TextRenderer, node: SceneNode): Uint8Array |
   const bytes = picture.serialize()
   picture.delete()
   return bytes ?? null
+}
+
+function resolveParagraphLayoutWidth(node: SceneNode, maxWidth?: number): number {
+  if (maxWidth !== undefined) return maxWidth
+  if (node.textAutoResize === 'WIDTH_AND_HEIGHT') return 1e6
+  return node.width || 1e6
 }
 
 function buildTruncateOpts(
@@ -166,7 +166,7 @@ export function buildParagraph(
   const ck = r.ck
   const baseColor = color ?? ck.BLACK
   const baseFontSize = node.fontSize || DEFAULT_FONT_SIZE
-  const cjkFallback = getCJKFallbackFamily()
+  const cjkFallbacks = getCJKFallbackFamilies()
 
   const truncateOpts = buildTruncateOpts(node, baseFontSize)
 
@@ -205,7 +205,12 @@ export function buildParagraph(
   }
 
   const paragraph = builder.build()
-  paragraph.layout(node.width || 1e6)
+  if (node.textAutoResize === 'WIDTH_AND_HEIGHT') {
+    paragraph.layout(1e6)
+    paragraph.layout(Math.max(node.width || 1, Math.ceil(paragraph.getLongestLine())))
+  } else {
+    paragraph.layout(resolveParagraphLayoutWidth(node))
+  }
   builder.delete()
   return paragraph
 }

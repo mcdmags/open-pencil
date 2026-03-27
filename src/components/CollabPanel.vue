@@ -1,36 +1,32 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { useClipboard } from '@vueuse/core'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  PopoverRoot,
-  PopoverTrigger,
-  PopoverPortal,
-  PopoverContent,
-  TooltipRoot,
-  TooltipTrigger,
-  TooltipPortal,
-  TooltipContent,
-  TooltipProvider
-} from 'reka-ui'
+import { PopoverRoot, PopoverTrigger, PopoverPortal, PopoverContent } from 'reka-ui'
 
 import { colorToCSS } from '@open-pencil/core'
-import { useCollabInjected } from '@/composables/use-collab'
-import { toast } from '@/composables/use-toast'
+import Tip from '@/components/ui/Tip.vue'
+import { usePopoverUI } from '@/components/ui/popover'
+import { DEFAULT_COLLAB_STATE, useCollabInjected } from '@/composables/use-collab'
+import { toast } from '@/utils/toast'
 import { initials } from '@/utils/text'
+import { useI18n } from '@open-pencil/vue'
 
 const route = useRoute()
 const router = useRouter()
+const cls = usePopoverUI({ content: 'z-50 w-72 p-3' })
 const collab = useCollabInjected()
+const { copy, copied } = useClipboard({ copiedDuring: 2000 })
+const { dialogs } = useI18n()
 
 const joinInput = ref('')
-const nameDraft = ref(collab.state.value.localName)
-const copied = ref(false)
+const nameDraft = ref(collab?.state.value.localName ?? '')
 const pendingRoomId = (route.params.roomId as string) || null
 const popoverOpen = ref(!!pendingRoomId)
 
-const state = computed(() => collab.state.value)
-const peers = computed(() => collab.remotePeers.value)
-const followingPeer = computed(() => collab.followingPeer.value)
+const state = computed(() => collab?.state.value ?? DEFAULT_COLLAB_STATE)
+const peers = computed(() => collab?.remotePeers.value ?? [])
+const followingPeer = computed(() => collab?.followingPeer.value ?? null)
 
 const shareUrl = computed(() => {
   if (!state.value.roomId) return ''
@@ -41,25 +37,22 @@ const isJoining = computed(() => !!pendingRoomId && !state.value.connected)
 
 function copyLink() {
   if (!shareUrl.value) return
-  navigator.clipboard.writeText(shareUrl.value)
+  copy(shareUrl.value)
   toast.show('Link copied to clipboard')
-  copied.value = true
-  setTimeout(() => {
-    copied.value = false
-  }, 2000)
 }
 
 function onShare() {
-  if (!nameDraft.value.trim()) return
+  if (!collab || !nameDraft.value.trim()) return
   collab.setLocalName(nameDraft.value.trim())
   const roomId = collab.shareCurrentDoc()
   router.push(`/share/${roomId}`)
-  navigator.clipboard.writeText(`${window.location.origin}/share/${roomId}`)
+  copy(`${window.location.origin}/share/${roomId}`)
   toast.show('Link copied to clipboard')
   popoverOpen.value = false
 }
 
 function onJoin() {
+  if (!collab) return
   const roomId = pendingRoomId || joinInput.value.trim().replace(/.*\/share\//, '')
   if (!roomId || !nameDraft.value.trim()) return
   collab.setLocalName(nameDraft.value.trim())
@@ -69,6 +62,7 @@ function onJoin() {
 }
 
 function onDisconnect() {
+  if (!collab) return
   collab.disconnect()
   router.push('/')
 }
@@ -77,59 +71,39 @@ function onDisconnect() {
 <template>
   <div class="flex w-full items-center justify-end gap-2">
     <!-- Avatar stack -->
-    <TooltipProvider :delay-duration="200">
-      <div class="flex -space-x-1.5">
-        <TooltipRoot>
-          <TooltipTrigger as-child>
-            <div
-              data-test-id="collab-local-avatar"
-              class="flex size-6 items-center justify-center rounded-full border-2 border-panel text-[10px] font-semibold text-white"
-              :style="{ background: colorToCSS(state.localColor) }"
-            >
-              {{ initials(state.localName || 'You') }}
-            </div>
-          </TooltipTrigger>
-          <TooltipPortal>
-            <TooltipContent
-              class="rounded bg-neutral-800 px-2 py-1 text-xs text-white shadow-lg"
-              :side-offset="4"
-            >
-              {{ state.localName || 'You' }} (you)
-            </TooltipContent>
-          </TooltipPortal>
-        </TooltipRoot>
+    <div class="flex -space-x-1.5">
+      <Tip :label="`${state.localName || 'You'} (you)`">
+        <div
+          data-test-id="collab-local-avatar"
+          class="flex size-6 items-center justify-center rounded-full border-2 border-panel text-[10px] font-semibold text-white"
+          :style="{ background: colorToCSS(state.localColor) }"
+        >
+          {{ initials(state.localName || 'You') }}
+        </div>
+      </Tip>
 
-        <TooltipRoot v-for="peer in peers" :key="peer.clientId">
-          <TooltipTrigger as-child>
-            <div
-              data-test-id="collab-peer-avatar"
-              class="flex size-6 cursor-pointer items-center justify-center rounded-full border-2 text-[10px] font-semibold text-white transition-all"
-              :class="
-                followingPeer === peer.clientId
-                  ? 'border-white ring-2 ring-white/40'
-                  : 'border-panel'
-              "
-              :style="{ background: colorToCSS(peer.color) }"
-              @click="collab.followPeer(followingPeer === peer.clientId ? null : peer.clientId)"
-            >
-              {{ initials(peer.name) }}
-            </div>
-          </TooltipTrigger>
-          <TooltipPortal>
-            <TooltipContent
-              class="rounded bg-neutral-800 px-2 py-1 text-xs text-white shadow-lg"
-              :side-offset="4"
-            >
-              {{
-                followingPeer === peer.clientId
-                  ? `Following ${peer.name} (click to stop)`
-                  : `Click to follow ${peer.name}`
-              }}
-            </TooltipContent>
-          </TooltipPortal>
-        </TooltipRoot>
-      </div>
-    </TooltipProvider>
+      <Tip
+        v-for="peer in peers"
+        :key="peer.clientId"
+        :label="
+          followingPeer === peer.clientId
+            ? `Following ${peer.name} (click to stop)`
+            : `Click to follow ${peer.name}`
+        "
+      >
+        <div
+          data-test-id="collab-peer-avatar"
+          class="flex size-6 cursor-pointer items-center justify-center rounded-full border-2 text-[10px] font-semibold text-white transition-all"
+          :class="
+            followingPeer === peer.clientId ? 'border-white ring-2 ring-white/40' : 'border-panel'
+          "
+          :style="{ background: colorToCSS(peer.color) }"
+          @click="collab?.followPeer(followingPeer === peer.clientId ? null : peer.clientId)"
+        >
+          {{ initials(peer.name) }}
+        </div>
+      </Tip>
+    </div>
 
     <div class="flex-1" />
 
@@ -148,21 +122,21 @@ function onDisconnect() {
           "
         >
           <icon-lucide-share-2 class="size-3.5" />
-          {{ state.connected ? 'Connected' : isJoining ? 'Join room' : 'Share' }}
+          {{ state.connected ? dialogs.connected : isJoining ? dialogs.joinRoom : dialogs.share }}
         </button>
       </PopoverTrigger>
 
       <PopoverPortal>
         <PopoverContent
           data-test-id="collab-popover"
-          class="z-50 w-72 rounded-lg border border-border bg-panel p-3 shadow-xl"
+          :class="cls.content"
           :side-offset="8"
           side="bottom"
           align="end"
         >
           <!-- Connected state -->
           <template v-if="state.connected">
-            <div class="mb-3 text-xs font-medium text-surface">Room link</div>
+            <div class="mb-3 text-xs font-medium text-surface">{{ dialogs.roomLink }}</div>
             <div class="mb-3 flex items-center gap-1.5">
               <input
                 :value="shareUrl"
@@ -197,18 +171,18 @@ function onDisconnect() {
 
           <!-- Joining via /share/ link -->
           <template v-else-if="isJoining">
-            <div class="mb-1 text-xs font-medium text-surface">Join collaboration</div>
+            <div class="mb-1 text-xs font-medium text-surface">{{ dialogs.joinCollaboration }}</div>
             <div class="mb-3 text-[11px] text-muted">
               Someone shared this file with you. Enter your name to join.
             </div>
 
             <div class="mb-3">
-              <label class="mb-1 block text-xs text-muted">Your name</label>
+              <label class="mb-1 block text-xs text-muted">{{ dialogs.yourName }}</label>
               <input
                 v-model="nameDraft"
                 data-test-id="collab-name-input"
                 class="w-full rounded border border-border bg-input px-2 py-1 text-xs text-surface"
-                placeholder="Enter your name"
+                :placeholder="dialogs.enterYourName"
                 autofocus
                 @keydown.enter="onJoin"
               />
@@ -228,12 +202,12 @@ function onDisconnect() {
           <!-- Not connected: share or join -->
           <template v-else>
             <div class="mb-3">
-              <label class="mb-1 block text-xs text-muted">Your name</label>
+              <label class="mb-1 block text-xs text-muted">{{ dialogs.yourName }}</label>
               <input
                 v-model="nameDraft"
                 data-test-id="collab-name-input"
                 class="w-full rounded border border-border bg-input px-2 py-1 text-xs text-surface"
-                placeholder="Enter your name"
+                :placeholder="dialogs.enterYourName"
                 @keydown.enter="onShare"
               />
             </div>
@@ -245,12 +219,12 @@ function onDisconnect() {
               @click="onShare"
             >
               <icon-lucide-share-2 class="size-3.5" />
-              Share this file
+              {{ dialogs.shareThisFile }}
             </button>
 
             <div class="mb-2 flex items-center gap-2">
               <div class="h-px flex-1 bg-border" />
-              <span class="text-[11px] text-muted">or join a room</span>
+              <span class="text-[11px] text-muted">{{ dialogs.orJoinRoom }}</span>
               <div class="h-px flex-1 bg-border" />
             </div>
 
@@ -259,7 +233,7 @@ function onDisconnect() {
                 v-model="joinInput"
                 data-test-id="collab-join-input"
                 class="min-w-0 flex-1 rounded border border-border bg-input px-2 py-1 text-xs text-surface"
-                placeholder="Paste room link or ID"
+                :placeholder="dialogs.pasteRoomLinkOrId"
                 @keydown.enter="onJoin"
               />
               <button

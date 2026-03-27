@@ -2,22 +2,26 @@
 import Prism from 'prismjs'
 import 'prismjs/components/prism-jsx'
 import { ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport } from 'reka-ui'
-import { computed, ref, watch } from 'vue'
+import { useClipboard } from '@vueuse/core'
+import { computed, ref } from 'vue'
 
 import { selectionToJSX } from '@open-pencil/core'
+import { useI18n, useSceneComputed } from '@open-pencil/vue'
+
 import { useEditorStore } from '@/stores/editor'
 
 import type { JSXFormat } from '@open-pencil/core'
 
 const store = useEditorStore()
-const copied = ref(false)
+const { copy, copied } = useClipboard({ copiedDuring: 2000 })
+const { dialogs } = useI18n()
 const jsxFormat = ref<JSXFormat>('openpencil')
 
 function toggleFormat() {
   jsxFormat.value = jsxFormat.value === 'openpencil' ? 'tailwind' : 'openpencil'
 }
 
-const jsxCode = computed(() => {
+const jsxCode = useSceneComputed(() => {
   void store.state.sceneVersion
   const ids = [...store.state.selectedIds]
   if (ids.length === 0) return ''
@@ -30,18 +34,9 @@ const highlightedLines = computed(() => {
   return jsxCode.value.split('\n').map((line) => Prism.highlight(line, grammar, 'jsx'))
 })
 
-let copyTimeout: ReturnType<typeof setTimeout> | undefined
-
 function copyCode() {
-  navigator.clipboard.writeText(jsxCode.value)
-  copied.value = true
-  clearTimeout(copyTimeout)
-  copyTimeout = setTimeout(() => (copied.value = false), 2000)
+  copy(jsxCode.value)
 }
-
-watch(jsxCode, () => {
-  copied.value = false
-})
 </script>
 
 <template>
@@ -50,7 +45,7 @@ watch(jsxCode, () => {
     data-test-id="code-panel-empty"
     class="flex flex-1 items-center justify-center px-4 text-center"
   >
-    <span class="text-xs text-muted">Select a layer to see its JSX code</span>
+    <span class="text-xs text-muted">{{ dialogs.selectLayerForJSX }}</span>
   </div>
 
   <div v-else data-test-id="code-panel" class="flex min-h-0 flex-1 flex-col">
@@ -75,7 +70,7 @@ watch(jsxCode, () => {
       >
         <icon-lucide-check v-if="copied" class="size-3 text-green-400" />
         <icon-lucide-copy v-else class="size-3" />
-        {{ copied ? 'Copied' : 'Copy' }}
+        {{ copied ? dialogs.copied : dialogs.copy }}
       </button>
     </div>
 
@@ -101,7 +96,7 @@ watch(jsxCode, () => {
   </div>
 </template>
 
-<style>
+<style scoped>
 .token.tag {
   color: #7dd3fc;
 }

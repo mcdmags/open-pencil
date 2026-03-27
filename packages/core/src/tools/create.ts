@@ -1,7 +1,6 @@
 import { parseColor } from '../color'
 import { createIconFromPaths } from '../icon-render'
 import { fetchIcons, searchIconsBatch } from '../iconify'
-
 import { defineTool, nodeSummary } from './schema'
 
 import type { FigmaNodeProxy } from '../figma-api'
@@ -254,7 +253,6 @@ export const createSlice = defineTool({
   }
 })
 
-
 export const fetchIconsTool = defineTool({
   name: 'fetch_icons',
   description:
@@ -282,8 +280,6 @@ export const fetchIconsTool = defineTool({
   }
 })
 
-
-
 export const insertIcon = defineTool({
   name: 'insert_icon',
   mutates: true,
@@ -292,14 +288,18 @@ export const insertIcon = defineTool({
   params: {
     names: {
       type: 'string[]',
-      description: 'Icon names as prefix:name (e.g. ["lucide:heart"] or ["lucide:heart","lucide:home","lucide:star"])'
+      description:
+        'Icon names as prefix:name (e.g. ["lucide:heart"] or ["lucide:heart","lucide:home","lucide:star"])'
     },
     name: {
       type: 'string',
       description: 'Single icon name (shorthand for names with one icon)'
     },
     size: { type: 'number', description: 'Icon size in pixels (default: 24)' },
-    color: { type: 'color', description: 'Icon color hex (replaces currentColor). Default: #000000' },
+    color: {
+      type: 'color',
+      description: 'Icon color hex (replaces currentColor). Default: #000000'
+    },
     parent_id: { type: 'string', description: 'Parent node ID for all icons' }
   },
   execute: async (figma, args) => {

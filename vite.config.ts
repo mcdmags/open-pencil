@@ -101,7 +101,6 @@ export default defineConfig(async () => ({
         '**/packages/mcp/**',
         '**/packages/docs/**',
         '**/tests/**',
-        '**/openspec/**',
         '**/.worktrees/**',
         '**/.github/**',
         '**/.pi/**'

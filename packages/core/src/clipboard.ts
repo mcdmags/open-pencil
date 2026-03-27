@@ -6,15 +6,14 @@ import {
   sceneNodeToKiwi,
   buildFigKiwi,
   parseFigKiwiChunks,
-  decompressFigKiwiDataAsync
-} from './kiwi-serialize'
-import { initCodec, getCompiledSchema, getSchemaBytes } from './kiwi/codec'
-import { decodeBinarySchema, compileSchema, ByteBuffer } from './kiwi/kiwi-schema'
-import { nodeChangeToProps, sortChildren } from './kiwi/kiwi-convert'
-import { populateAndApplyOverrides } from './kiwi/instance-overrides'
-import type { InstanceNodeChange } from './kiwi/instance-overrides'
+  decompressFigKiwiDataAsync,
+  makeDocumentNodeChange,
+  makeCanvasNodeChange
+} from './kiwi/kiwi-serialize'
+import { randomInt } from './random'
 
 import type { NodeChange as KiwiNodeChange } from './kiwi/codec'
+import type { InstanceNodeChange } from './kiwi/instance-overrides'
 import type { SceneGraph, SceneNode } from './scene-graph'
 
 interface FigmaClipboardMeta {
@@ -83,7 +82,11 @@ function isChildOfVisualNode(nc: KiwiNodeChange, parentTypes: Map<string, string
   const parentId = nc.parentIndex?.guid
     ? `${nc.parentIndex.guid.sessionID}:${nc.parentIndex.guid.localID}`
     : null
-  return !!parentId && parentTypes.has(parentId) && !NON_VISUAL_TYPES.has(parentTypes.get(parentId) ?? '')
+  return (
+    !!parentId &&
+    parentTypes.has(parentId) &&
+    !NON_VISUAL_TYPES.has(parentTypes.get(parentId) ?? '')
+  )
 }
 
 export function figmaNodesBounds(
@@ -215,7 +218,11 @@ export function importClipboardNodes(
 ): string[] {
   const { guidMap, parentMap } = buildClipboardMaps(nodeChanges)
   const { internalCanvasIds, internalFigmaIds } = findInternalNodeIds(guidMap, parentMap)
-  const { topLevel, internalTopLevel } = classifyTopLevelNodes(guidMap, parentMap, internalCanvasIds)
+  const { topLevel, internalTopLevel } = classifyTopLevelNodes(
+    guidMap,
+    parentMap,
+    internalCanvasIds
+  )
 
   const created = new Map<string, string>()
   const createdIds: string[] = []
@@ -285,25 +292,8 @@ export function buildFigmaClipboardHTML(nodes: SceneNode[], graph: SceneGraph): 
   const localIdCounter = { value: 100 }
 
   const nodeChanges: KiwiNodeChange[] = [
-    {
-      guid: docGuid,
-      type: 'DOCUMENT',
-      name: 'Document',
-      visible: true,
-      opacity: 1,
-      phase: 'CREATED',
-      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 }
-    },
-    {
-      guid: canvasGuid,
-      parentIndex: { guid: docGuid, position: '!' },
-      type: 'CANVAS',
-      name: 'Page 1',
-      visible: true,
-      opacity: 1,
-      phase: 'CREATED',
-      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 }
-    }
+    makeDocumentNodeChange(docGuid),
+    makeCanvasNodeChange(canvasGuid, docGuid, '!', 'Page 1')
   ]
 
   const blobs: Uint8Array[] = []
@@ -349,9 +339,7 @@ export interface OpenPencilClipboardData {
   images: Map<string, Uint8Array>
 }
 
-export function parseOpenPencilClipboard(
-  html: string
-): OpenPencilClipboardData | null {
+export function parseOpenPencilClipboard(html: string): OpenPencilClipboardData | null {
   const match = html.match(/<!--\(openpencil\)(.*?)\(\/openpencil\)-->/s)
   if (!match) return null
 

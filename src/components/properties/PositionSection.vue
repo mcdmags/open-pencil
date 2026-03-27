@@ -1,261 +1,183 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
 import ScrubInput from '@/components/ScrubInput.vue'
-import { useNodeProps } from '@/composables/use-node-props'
-import { useMultiProps } from '@/composables/use-multi-props'
+import Tip from '@/components/ui/Tip.vue'
+import { iconButton } from '@/components/ui/icon-button'
+import { sectionWrapper } from '@/components/ui/section'
+import { useEditorStore } from '@/stores/editor'
+import { PositionControlsRoot, useI18n } from '@open-pencil/vue'
 
-const { store, updateProp, commitProp } = useNodeProps()
-const { node, nodes, isMulti, active, prop: multiProp } = useMultiProps()
+const { panels } = useI18n()
+const store = useEditorStore()
 
-const xValue = computed(() =>
-  isMulti.value ? multiProp('x').value : Math.round(node.value?.x ?? 0)
-)
-const yValue = computed(() =>
-  isMulti.value ? multiProp('y').value : Math.round(node.value?.y ?? 0)
-)
-const wValue = multiProp('width')
-const hValue = multiProp('height')
-const rotationValue = computed(() =>
-  isMulti.value ? multiProp('rotation').value : Math.round(node.value?.rotation ?? 0)
-)
-
-type HAlign = 'left' | 'center' | 'right'
-type VAlign = 'top' | 'center' | 'bottom'
-
-function alignHorizontal(align: HAlign) {
-  const selected = nodes.value
-  if (selected.length === 0) return
-
-  let minX: number, maxX: number
-
-  if (selected.length === 1) {
-    const parent = store.graph.getNode(selected[0].parentId ?? '')
-    if (!parent) return
-    minX = 0
-    maxX = parent.width
+function handleAlign(
+  nodeAlign: (axis: 'horizontal' | 'vertical', pos: 'min' | 'center' | 'max') => void,
+  axis: 'horizontal' | 'vertical',
+  pos: 'min' | 'center' | 'max'
+) {
+  const es = store.state.nodeEditState
+  if (es && es.selectedVertexIndices.size >= 2) {
+    store.nodeEditAlignVertices(axis, pos)
   } else {
-    minX = Infinity
-    maxX = -Infinity
-    for (const n of selected) {
-      const abs = store.graph.getAbsolutePosition(n.id)
-      minX = Math.min(minX, abs.x)
-      maxX = Math.max(maxX, abs.x + n.width)
-    }
+    nodeAlign(axis, pos)
   }
-
-  for (const n of selected) {
-    let targetX: number
-    if (selected.length === 1) {
-      if (align === 'left') targetX = minX
-      else if (align === 'right') targetX = maxX - n.width
-      else targetX = (minX + maxX) / 2 - n.width / 2
-      store.updateNode(n.id, { x: targetX })
-    } else {
-      const abs = store.graph.getAbsolutePosition(n.id)
-      if (align === 'left') targetX = minX
-      else if (align === 'right') targetX = maxX - n.width
-      else targetX = (minX + maxX) / 2 - n.width / 2
-      store.updateNode(n.id, { x: n.x + (targetX - abs.x) })
-    }
-  }
-  store.requestRender()
-}
-
-function alignVertical(align: VAlign) {
-  const selected = nodes.value
-  if (selected.length === 0) return
-
-  let minY: number, maxY: number
-
-  if (selected.length === 1) {
-    const parent = store.graph.getNode(selected[0].parentId ?? '')
-    if (!parent) return
-    minY = 0
-    maxY = parent.height
-  } else {
-    minY = Infinity
-    maxY = -Infinity
-    for (const n of selected) {
-      const abs = store.graph.getAbsolutePosition(n.id)
-      minY = Math.min(minY, abs.y)
-      maxY = Math.max(maxY, abs.y + n.height)
-    }
-  }
-
-  for (const n of selected) {
-    let targetY: number
-    if (selected.length === 1) {
-      if (align === 'top') targetY = minY
-      else if (align === 'bottom') targetY = maxY - n.height
-      else targetY = (minY + maxY) / 2 - n.height / 2
-      store.updateNode(n.id, { y: targetY })
-    } else {
-      const abs = store.graph.getAbsolutePosition(n.id)
-      if (align === 'top') targetY = minY
-      else if (align === 'bottom') targetY = maxY - n.height
-      else targetY = (minY + maxY) / 2 - n.height / 2
-      store.updateNode(n.id, { y: n.y + (targetY - abs.y) })
-    }
-  }
-  store.requestRender()
-}
-
-function flipHorizontal() {
-  for (const n of nodes.value) {
-    store.updateNodeWithUndo(n.id, { flipX: !n.flipX }, 'Flip horizontal')
-  }
-  store.requestRender()
-}
-
-function flipVertical() {
-  for (const n of nodes.value) {
-    store.updateNodeWithUndo(n.id, { flipY: !n.flipY }, 'Flip vertical')
-  }
-  store.requestRender()
-}
-
-function rotate90() {
-  for (const n of nodes.value) {
-    store.updateNodeWithUndo(n.id, { rotation: (n.rotation + 90) % 360 }, 'Rotate 90°')
-  }
-  store.requestRender()
 }
 </script>
 
 <template>
-  <div v-if="active" data-test-id="position-section" class="border-b border-border px-3 py-2">
-    <label class="mb-1.5 block text-[11px] text-muted">Position</label>
+  <PositionControlsRoot
+    v-slot="{
+      active,
+      isMulti,
+      xValue,
+      yValue,
+      wValue,
+      hValue,
+      rotationValue,
+      updateProp,
+      commitProp,
+      align,
+      flip,
+      rotate
+    }"
+  >
+    <div v-if="active" data-test-id="position-section" :class="sectionWrapper()">
+      <label class="mb-1.5 block text-[11px] text-muted">{{ panels.position }}</label>
 
-    <!-- Alignment buttons -->
-    <div class="mb-1.5 flex gap-2">
-      <div class="flex gap-0.5">
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-left"
-          title="Align left"
-          @click="alignHorizontal('left')"
-        >
-          <icon-lucide-align-horizontal-justify-start class="size-3.5" />
-        </button>
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-center-h"
-          title="Align center horizontally"
-          @click="alignHorizontal('center')"
-        >
-          <icon-lucide-align-horizontal-justify-center class="size-3.5" />
-        </button>
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-right"
-          title="Align right"
-          @click="alignHorizontal('right')"
-        >
-          <icon-lucide-align-horizontal-justify-end class="size-3.5" />
-        </button>
+      <div class="mb-1.5 flex gap-2">
+        <div class="flex gap-0.5">
+          <Tip :label="panels.alignLeft">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-left"
+              @click="handleAlign(align, 'horizontal', 'min')"
+            >
+              <icon-lucide-align-start-vertical class="size-3.5" />
+            </button>
+          </Tip>
+          <Tip :label="panels.alignCenterHorizontally">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-center-h"
+              @click="handleAlign(align, 'horizontal', 'center')"
+            >
+              <icon-lucide-align-center-vertical class="size-3.5" />
+            </button>
+          </Tip>
+          <Tip :label="panels.alignRight">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-right"
+              @click="handleAlign(align, 'horizontal', 'max')"
+            >
+              <icon-lucide-align-end-vertical class="size-3.5" />
+            </button>
+          </Tip>
+        </div>
+        <div class="flex gap-0.5">
+          <Tip :label="panels.alignTop">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-top"
+              @click="handleAlign(align, 'vertical', 'min')"
+            >
+              <icon-lucide-align-start-horizontal class="size-3.5" />
+            </button>
+          </Tip>
+          <Tip :label="panels.alignCenterVertically">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-center-v"
+              @click="handleAlign(align, 'vertical', 'center')"
+            >
+              <icon-lucide-align-center-horizontal class="size-3.5" />
+            </button>
+          </Tip>
+          <Tip :label="panels.alignBottom">
+            <button
+              :class="iconButton({ size: 'md' })"
+              data-test-id="position-align-bottom"
+              @click="handleAlign(align, 'vertical', 'max')"
+            >
+              <icon-lucide-align-end-horizontal class="size-3.5" />
+            </button>
+          </Tip>
+        </div>
       </div>
-      <div class="flex gap-0.5">
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-top"
-          title="Align top"
-          @click="alignVertical('top')"
+
+      <div class="flex gap-1.5">
+        <ScrubInput
+          icon="X"
+          :model-value="xValue"
+          @update:model-value="updateProp('x', $event)"
+          @commit="(v: number, p: number) => commitProp('x', v, p)"
+        />
+        <ScrubInput
+          icon="Y"
+          :model-value="yValue"
+          @update:model-value="updateProp('y', $event)"
+          @commit="(v: number, p: number) => commitProp('y', v, p)"
+        />
+      </div>
+
+      <div v-if="isMulti" class="mt-1.5 flex gap-1.5">
+        <ScrubInput
+          icon="W"
+          :model-value="wValue"
+          :min="1"
+          @update:model-value="updateProp('width', $event)"
+          @commit="(v: number, p: number) => commitProp('width', v, p)"
+        />
+        <ScrubInput
+          icon="H"
+          :model-value="hValue"
+          :min="1"
+          @update:model-value="updateProp('height', $event)"
+          @commit="(v: number, p: number) => commitProp('height', v, p)"
+        />
+      </div>
+
+      <div class="mt-1.5 flex items-center gap-1.5">
+        <ScrubInput
+          class="flex-1"
+          suffix="°"
+          :model-value="rotationValue"
+          :min="-360"
+          :max="360"
+          @update:model-value="updateProp('rotation', $event)"
+          @commit="(v: number, p: number) => commitProp('rotation', v, p)"
         >
-          <icon-lucide-align-vertical-justify-start class="size-3.5" />
-        </button>
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-center-v"
-          title="Align center vertically"
-          @click="alignVertical('center')"
-        >
-          <icon-lucide-align-vertical-justify-center class="size-3.5" />
-        </button>
-        <button
-          class="flex size-7 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-          data-test-id="position-align-bottom"
-          title="Align bottom"
-          @click="alignVertical('bottom')"
-        >
-          <icon-lucide-align-vertical-justify-end class="size-3.5" />
-        </button>
+          <template #icon>
+            <icon-lucide-rotate-cw class="size-3" />
+          </template>
+        </ScrubInput>
+        <Tip :label="panels.flipHorizontal">
+          <button
+            :class="iconButton({ size: 'md', ui: { base: 'shrink-0' } })"
+            data-test-id="position-flip-horizontal"
+            @click="flip('horizontal')"
+          >
+            <icon-lucide-flip-horizontal-2 class="size-3.5" />
+          </button>
+        </Tip>
+        <Tip :label="panels.flipVertical">
+          <button
+            :class="iconButton({ size: 'md', ui: { base: 'shrink-0' } })"
+            data-test-id="position-flip-vertical"
+            @click="flip('vertical')"
+          >
+            <icon-lucide-flip-vertical-2 class="size-3.5" />
+          </button>
+        </Tip>
+        <Tip :label="panels.rotate90">
+          <button
+            :class="iconButton({ size: 'md', ui: { base: 'shrink-0' } })"
+            data-test-id="position-rotate-90"
+            @click="rotate(90)"
+          >
+            <icon-lucide-rotate-cw-square class="size-3.5" />
+          </button>
+        </Tip>
       </div>
     </div>
-
-    <!-- X / Y -->
-    <div class="flex gap-1.5">
-      <ScrubInput
-        icon="X"
-        :model-value="xValue"
-        @update:model-value="updateProp('x', $event)"
-        @commit="(v: number, p: number) => commitProp('x', v, p)"
-      />
-      <ScrubInput
-        icon="Y"
-        :model-value="yValue"
-        @update:model-value="updateProp('y', $event)"
-        @commit="(v: number, p: number) => commitProp('y', v, p)"
-      />
-    </div>
-
-    <!-- W / H (multi-select only; single-select shows in LayoutSection) -->
-    <div v-if="isMulti" class="mt-1.5 flex gap-1.5">
-      <ScrubInput
-        icon="W"
-        :model-value="wValue"
-        :min="1"
-        @update:model-value="updateProp('width', $event)"
-        @commit="(v: number, p: number) => commitProp('width', v, p)"
-      />
-      <ScrubInput
-        icon="H"
-        :model-value="hValue"
-        :min="1"
-        @update:model-value="updateProp('height', $event)"
-        @commit="(v: number, p: number) => commitProp('height', v, p)"
-      />
-    </div>
-
-    <!-- Rotation + flip -->
-    <div class="mt-1.5 flex items-center gap-1.5">
-      <ScrubInput
-        class="flex-1"
-        suffix="°"
-        :model-value="rotationValue"
-        :min="-360"
-        :max="360"
-        @update:model-value="updateProp('rotation', $event)"
-        @commit="(v: number, p: number) => commitProp('rotation', v, p)"
-      >
-        <template #icon>
-          <icon-lucide-rotate-ccw class="size-3" />
-        </template>
-      </ScrubInput>
-      <button
-        class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-        data-test-id="position-flip-horizontal"
-        title="Flip horizontal"
-        @click="flipHorizontal"
-      >
-        <icon-lucide-flip-horizontal class="size-3.5" />
-      </button>
-      <button
-        class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-        data-test-id="position-flip-vertical"
-        title="Flip vertical"
-        @click="flipVertical"
-      >
-        <icon-lucide-flip-vertical class="size-3.5" />
-      </button>
-      <button
-        class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded border border-border bg-input text-muted hover:bg-hover hover:text-surface"
-        data-test-id="position-rotate-90"
-        title="Rotate 90°"
-        @click="rotate90"
-      >
-        <icon-lucide-rotate-cw class="size-3.5" />
-      </button>
-    </div>
-  </div>
+  </PositionControlsRoot>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useClipboard } from '@vueuse/core'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -19,12 +20,14 @@ import IconImageDown from '~icons/lucide/image-down'
 import IconSave from '~icons/lucide/save'
 import IconZoomIn from '~icons/lucide/zoom-in'
 
-import { menuContent, menuItem } from '@/components/ui/menu'
+import { menu, useMenuUI } from '@/components/ui/menu'
 import { openFileDialog } from '@/composables/use-menu'
 import { useCollabInjected } from '@/composables/use-collab'
 import { toast } from '@/composables/use-toast'
 import { useEditorStore } from '@/stores/editor'
+import Tip from '@/components/ui/Tip.vue'
 import { colorToCSS } from '@open-pencil/core'
+import { useEditorCommands, useI18n } from '@open-pencil/vue'
 import { toolIcons } from '@/utils/tools'
 import { initials } from '@/utils/text'
 
@@ -34,6 +37,27 @@ const route = useRoute()
 const router = useRouter()
 const collab = useCollabInjected()
 const store = useEditorStore()
+const { copy } = useClipboard()
+const { dialogs } = useI18n()
+
+const collabState = computed(() => collab?.state.value ?? DEFAULT_COLLAB_STATE)
+const collabPeers = computed(() => collab?.remotePeers.value ?? [])
+const followingPeer = computed(() => collab?.followingPeer.value ?? null)
+const { getCommand } = useEditorCommands()
+
+function onShare() {
+  if (!collab) return
+  const roomId = collab.shareCurrentDoc()
+  router.push(`/share/${roomId}`)
+  copy(`${window.location.origin}/share/${roomId}`)
+  toast.show('Link copied to clipboard')
+}
+
+function onDisconnect() {
+  if (!collab) return
+  collab.disconnect()
+  router.push('/')
+}
 
 const collabState = computed(() => collab.state.value)
 const collabPeers = computed(() => collab.remotePeers.value)
@@ -59,6 +83,10 @@ function onDisconnect() {
 }
 
 const activeToolIcon = computed(() => toolIcons[store.state.activeTool])
+const menuCls = useMenuUI({
+  content: 'w-48 rounded-xl p-1.5 shadow-xl',
+  item: 'w-full gap-2.5 rounded-lg border-none bg-transparent px-2.5 py-2 active:bg-hover'
+})
 
 interface MenuAction {
   icon: Component
@@ -79,7 +107,7 @@ const menuItems: MenuAction[] = [
     label: 'Export…',
     action: () => store.exportSelection(1, 'PNG')
   },
-  { icon: IconZoomIn, label: 'Zoom to fit', action: () => store.zoomToFit() }
+  { icon: IconZoomIn, label: 'Zoom to fit', action: () => getCommand('view.zoomFit').run() }
 ]
 
 const onlineCount = computed(() => collabPeers.value.length + 1)
@@ -93,20 +121,22 @@ const onlineCount = computed(() => collabPeers.value.length + 1)
     <!-- Undo / Redo + active tool indicator -->
     <div class="pointer-events-auto flex flex-col items-start gap-1.5">
       <div class="flex gap-1.5">
-        <button
-          class="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/10 bg-panel/70 shadow-md backdrop-blur-xl select-none active:bg-hover"
-          title="Undo"
-          @click="store.undoAction()"
-        >
-          <icon-lucide-undo-2 class="size-3.5 text-surface" />
-        </button>
-        <button
-          class="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/10 bg-panel/70 shadow-md backdrop-blur-xl select-none active:bg-hover"
-          title="Redo"
-          @click="store.redoAction()"
-        >
-          <icon-lucide-redo-2 class="size-3.5 text-surface" />
-        </button>
+        <Tip label="Undo">
+          <button
+            class="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/10 bg-panel/70 shadow-md backdrop-blur-xl select-none active:bg-hover"
+            @click="getCommand('edit.undo').run()"
+          >
+            <icon-lucide-undo-2 class="size-3.5 text-surface" />
+          </button>
+        </Tip>
+        <Tip label="Redo">
+          <button
+            class="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/10 bg-panel/70 shadow-md backdrop-blur-xl select-none active:bg-hover"
+            @click="getCommand('edit.redo').run()"
+          >
+            <icon-lucide-redo-2 class="size-3.5 text-surface" />
+          </button>
+        </Tip>
       </div>
       <div
         class="flex size-8 items-center justify-center rounded-full border border-accent/20 bg-panel/70 shadow-md backdrop-blur-xl transition-colors duration-200"
@@ -212,7 +242,7 @@ const onlineCount = computed(() => collabPeers.value.length + 1)
         @click="onShare"
       >
         <icon-lucide-share-2 class="size-3.5 text-surface" />
-        <span class="text-xs text-surface">Share</span>
+        <span class="text-xs text-surface">{{ dialogs.share }}</span>
       </button>
 
       <DropdownMenuRoot>
@@ -224,22 +254,11 @@ const onlineCount = computed(() => collabPeers.value.length + 1)
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuPortal>
-          <DropdownMenuContent
-            :side-offset="8"
-            side="bottom"
-            align="end"
-            :class="menuContent({ class: 'w-48 rounded-xl p-1.5 shadow-xl' })"
-          >
+          <DropdownMenuContent :side-offset="8" side="bottom" align="end" :class="menuCls.content">
             <DropdownMenuItem
               v-for="item in menuItems"
               :key="item.label"
-              :class="
-                menuItem({
-                  justify: 'start',
-                  class:
-                    'w-full gap-2.5 rounded-lg border-none bg-transparent px-2.5 py-2 active:bg-hover'
-                })
-              "
+              :class="menu({ justify: 'start' }).item({ class: menuCls.item })"
               @click="item.action()"
             >
               <component :is="item.icon" class="size-4 text-muted" />

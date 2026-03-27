@@ -3,6 +3,11 @@ import { createNanoEvents } from 'nanoevents'
 
 import { BLACK, DEFAULT_FONT_FAMILY, DEFAULT_STROKE_MITER_LIMIT } from './constants'
 import {
+  hitTest as hitTestFn,
+  hitTestDeep as hitTestDeepFn,
+  hitTestFrame as hitTestFrameFn
+} from './scene-graph-hit-test'
+import {
   createInstance as createInstanceFn,
   populateInstanceChildren as populateInstanceChildrenFn,
   syncInstances as syncInstancesFn,
@@ -10,11 +15,6 @@ import {
   getMainComponent as getMainComponentFn,
   getInstances as getInstancesFn
 } from './scene-graph-instances'
-import {
-  hitTest as hitTestFn,
-  hitTestDeep as hitTestDeepFn,
-  hitTestFrame as hitTestFrameFn
-} from './scene-graph-hit-test'
 
 export type { GUID, Color } from './types'
 import type { Matrix, Vector, Color, Rect } from './types'
@@ -58,6 +58,22 @@ export interface VectorNetwork {
   regions: VectorRegion[]
 }
 
+/** Deep-copy a VectorNetwork, stripping any Vue Proxy wrappers. */
+export function cloneVectorNetwork(vn: VectorNetwork): VectorNetwork {
+  return {
+    vertices: vn.vertices.map((v) => ({ ...v })),
+    segments: vn.segments.map((s) => ({
+      ...s,
+      tangentStart: { ...s.tangentStart },
+      tangentEnd: { ...s.tangentEnd }
+    })),
+    regions: vn.regions.map((r) => ({
+      windingRule: r.windingRule,
+      loops: r.loops.map((l) => [...l])
+    }))
+  }
+}
+
 export interface GeometryPath {
   windingRule: WindingRule
   commandsBlob: Uint8Array
@@ -81,7 +97,6 @@ export type NodeType =
   | 'INSTANCE'
   | 'CONNECTOR'
   | 'SHAPE_WITH_TEXT'
-
 
 export type FillType =
   | 'SOLID'
@@ -372,7 +387,10 @@ function createDefaultNode(type: NodeType, overrides: Partial<SceneNode> = {}): 
     width: 100,
     height: 100,
     rotation: 0,
-    fills: [],
+    fills:
+      type === 'TEXT'
+        ? [{ type: 'SOLID' as const, color: { r: 0, g: 0, b: 0, a: 1 }, opacity: 1, visible: true }]
+        : [],
     strokes: [],
     effects: [],
     opacity: 1,
@@ -478,6 +496,7 @@ export class SceneGraph {
   variableCollections = new Map<string, VariableCollection>()
   activeMode = new Map<string, string>()
   rootId: string
+  figKiwiVersion: number | null = null
   readonly emitter: Emitter<SceneGraphEvents> = createNanoEvents()
   private absPosCache = new Map<string, Vector>()
   instanceIndex = new Map<string, Set<string>>()
@@ -757,7 +776,11 @@ export class SceneGraph {
     const node = this.nodes.get(id)
     if (!node) return
     this.absPosCache.clear()
-    if (node.type === 'INSTANCE' && 'componentId' in changes && changes.componentId !== node.componentId) {
+    if (
+      node.type === 'INSTANCE' &&
+      'componentId' in changes &&
+      changes.componentId !== node.componentId
+    ) {
       if (node.componentId) this.instanceIndex.get(node.componentId)?.delete(id)
       if (changes.componentId) {
         let set = this.instanceIndex.get(changes.componentId)
@@ -768,7 +791,11 @@ export class SceneGraph {
         set.add(id)
       }
     }
-    if (node.type === 'TEXT' && node.textPicture && Object.keys(changes).some((k) => SceneGraph.TEXT_PICTURE_KEYS.has(k))) {
+    if (
+      node.type === 'TEXT' &&
+      node.textPicture &&
+      Object.keys(changes).some((k) => SceneGraph.TEXT_PICTURE_KEYS.has(k))
+    ) {
       node.textPicture = null
     }
     Object.assign(node, changes)
@@ -839,6 +866,21 @@ export class SceneGraph {
     newParent.childIds.splice(idx, 0, nodeId)
 
     this.emitter.emit('node:reordered', nodeId, parentId, idx)
+  }
+
+  insertChildAt(childId: string, parentId: string, index: number): void {
+    const oldParent = this.getNode(this.getNode(childId)?.parentId ?? '')
+    if (oldParent) {
+      oldParent.childIds = oldParent.childIds.filter((id) => id !== childId)
+    }
+    const newParent = this.getNode(parentId)
+    if (!newParent) return
+    newParent.childIds = newParent.childIds.filter((id) => id !== childId)
+    newParent.childIds.splice(index, 0, childId)
+    const node = this.getNode(childId)
+    if (node) node.parentId = parentId
+    this.clearAbsPosCache()
+    this.emitter.emit('node:reordered', childId, parentId, index)
   }
 
   deleteNode(id: string): void {

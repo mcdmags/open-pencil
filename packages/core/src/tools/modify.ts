@@ -6,6 +6,9 @@ import type { Matrix } from '../types'
 
 import { defineTool } from './schema'
 
+import type { CharacterStyleOverride, Effect, StyleRun } from '../scene-graph'
+import type { Matrix } from '../types'
+
 export const setFill = defineTool({
   name: 'set_fill',
   mutates: true,
@@ -110,9 +113,9 @@ export const setEffects = defineTool({
     if (!node) return { error: `Node "${args.id}" not found` }
 
     const isBlur = args.type === 'FOREGROUND_BLUR' || args.type === 'BACKGROUND_BLUR'
-    const color = isBlur
-      ? { r: 0, g: 0, b: 0, a: 0 }
-      : (args.color ? parseColor(args.color) : { ...DEFAULT_SHADOW_COLOR })
+    let color = { ...DEFAULT_SHADOW_COLOR }
+    if (isBlur) color = { r: 0, g: 0, b: 0, a: 0 }
+    else if (args.color) color = parseColor(args.color)
     const effect: Effect = {
       type: args.type as Effect['type'],
       visible: true,
@@ -205,8 +208,16 @@ export const setLayout = defineTool({
       description: 'Layout direction (keeps current if omitted)',
       enum: ['HORIZONTAL', 'VERTICAL']
     },
-    spacing: { type: 'number', description: 'Gap between items (only changes if provided)', min: 0 },
-    padding: { type: 'number', description: 'Equal padding on all sides (only changes if provided)', min: 0 },
+    spacing: {
+      type: 'number',
+      description: 'Gap between items (only changes if provided)',
+      min: 0
+    },
+    padding: {
+      type: 'number',
+      description: 'Equal padding on all sides (only changes if provided)',
+      min: 0
+    },
     padding_horizontal: { type: 'number', description: 'Horizontal padding', min: 0 },
     padding_vertical: { type: 'number', description: 'Vertical padding', min: 0 },
     align: {
@@ -226,7 +237,9 @@ export const setLayout = defineTool({
 
     const raw = figma.graph.getNode(args.id)
     if (!args.direction && raw?.layoutMode === 'NONE') {
-      return { error: 'Frame has no auto-layout. Pass direction ("HORIZONTAL" or "VERTICAL") to enable it.' }
+      return {
+        error: 'Frame has no auto-layout. Pass direction ("HORIZONTAL" or "VERTICAL") to enable it.'
+      }
     }
 
     const wasNone = raw?.layoutMode === 'NONE'
@@ -685,7 +698,11 @@ export const setImageFill = defineTool({
   description: 'Set an image fill on a node from base64-encoded image data.',
   params: {
     id: { type: 'string', description: 'Node ID', required: true },
-    image_data: { type: 'string', description: 'Base64-encoded image bytes (PNG, JPEG, or WEBP)', required: true },
+    image_data: {
+      type: 'string',
+      description: 'Base64-encoded image bytes (PNG, JPEG, or WEBP)',
+      required: true
+    },
     scale_mode: {
       type: 'string',
       description: 'Image scale mode',
@@ -699,14 +716,16 @@ export const setImageFill = defineTool({
     const bytes = Uint8Array.fromBase64(image_data)
     const image = figma.createImage(bytes)
     const mode = (scale_mode ?? 'FILL') as 'FILL' | 'FIT' | 'CROP' | 'TILE'
-    node.fills = [{
-      type: 'IMAGE',
-      color: { r: 0, g: 0, b: 0, a: 1 },
-      opacity: 1,
-      visible: true,
-      imageHash: image.hash,
-      imageScaleMode: mode
-    }]
+    node.fills = [
+      {
+        type: 'IMAGE',
+        color: { r: 0, g: 0, b: 0, a: 1 },
+        opacity: 1,
+        visible: true,
+        imageHash: image.hash,
+        imageScaleMode: mode
+      }
+    ]
     return { id, imageHash: image.hash, scaleMode: mode }
   }
 })

@@ -4,14 +4,6 @@ import { IS_BROWSER } from './constants'
 
 let instance: CanvasKit | null = null
 
-export type GpuBackend = 'webgl' | 'webgpu'
-
-let activeBackend: GpuBackend = 'webgl'
-
-export function getGpuBackend(): GpuBackend {
-  return activeBackend
-}
-
 export interface CanvasKitOptions {
   locateFile?: (file: string) => string
   backend?: GpuBackend
@@ -43,26 +35,14 @@ function loadCanvasKitWebGPU(): Promise<(opts?: Record<string, unknown>) => Prom
 export async function getCanvasKit(options?: CanvasKitOptions): Promise<CanvasKit> {
   if (instance) return instance
 
-  const backend = options?.backend ?? detectBackend()
-  activeBackend = backend
-
   const defaultLocate = (file: string) => {
     if (IS_BROWSER) return `/${file}`
     return file
   }
 
-  if (backend === 'webgpu') {
-    const init = await loadCanvasKitWebGPU()
-    instance = await init({
-      locateFile:
-        options?.locateFile ??
-        ((file: string) => `/canvaskit-webgpu/${file}`)
-    })
-  } else {
-    instance = await CanvasKitInit({
-      locateFile: options?.locateFile ?? defaultLocate
-    })
-  }
+  instance = await CanvasKitInit({
+    locateFile: options?.locateFile ?? defaultLocate
+  })
 
   return instance
 }

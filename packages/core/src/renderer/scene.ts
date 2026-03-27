@@ -1,15 +1,11 @@
 import { DROP_HIGHLIGHT_ALPHA, DROP_HIGHLIGHT_STROKE, SECTION_CORNER_RADIUS } from '../constants'
+
 import type { SceneNode, SceneGraph } from '../scene-graph'
-import type { Canvas, EmbindEnumEntity, Path } from 'canvaskit-wasm'
 import type { Color } from '../types'
 import type { SkiaRenderer, RenderOverlays } from './renderer'
+import type { Canvas, EmbindEnumEntity, Path } from 'canvaskit-wasm'
 
-function isCulled(
-  r: SkiaRenderer,
-  node: SceneNode,
-  absX: number,
-  absY: number
-): boolean {
+function isCulled(r: SkiaRenderer, node: SceneNode, absX: number, absY: number): boolean {
   const canCull =
     node.childIds.length === 0 ||
     ((node.type === 'FRAME' || node.type === 'COMPONENT' || node.type === 'INSTANCE') &&
@@ -34,7 +30,7 @@ function isCulled(
 }
 
 function applyNodeTransforms(
-  r: SkiaRenderer,
+  _r: SkiaRenderer,
   canvas: Canvas,
   node: SceneNode,
   nodeId: string,
@@ -47,10 +43,7 @@ function applyNodeTransforms(
   }
 
   if (node.flipX || node.flipY) {
-    canvas.translate(
-      node.flipX ? node.width : 0,
-      node.flipY ? node.height : 0
-    )
+    canvas.translate(node.flipX ? node.width : 0, node.flipY ? node.height : 0)
     canvas.scale(node.flipX ? -1 : 1, node.flipY ? -1 : 1)
   }
 }
@@ -95,8 +88,13 @@ function renderChildren(
     node.type === 'FRAME' || node.type === 'COMPONENT' || node.type === 'INSTANCE'
   if (isClippableContainer && node.clipsContent && node.childIds.length > 0) {
     canvas.save()
-    const hasRadius = node.cornerRadius > 0 || (node.independentCorners &&
-      (node.topLeftRadius > 0 || node.topRightRadius > 0 || node.bottomRightRadius > 0 || node.bottomLeftRadius > 0))
+    const hasRadius =
+      node.cornerRadius > 0 ||
+      (node.independentCorners &&
+        (node.topLeftRadius > 0 ||
+          node.topRightRadius > 0 ||
+          node.bottomRightRadius > 0 ||
+          node.bottomLeftRadius > 0))
     if (hasRadius) {
       canvas.clipRRect(r.makeRRect(node), r.ck.ClipOp.Intersect, true)
     } else {
@@ -124,6 +122,9 @@ export function renderNode(
 ): void {
   const node = graph.getNode(nodeId)
   if (!node || !node.visible) return
+
+  // Hide the node being edited in node-edit mode (overlay draws it live)
+  if (overlays.nodeEditState?.nodeId === nodeId) return
 
   r._nodeCount++
 
@@ -219,10 +220,7 @@ export function renderComponentSet(
   r.auxStroke.setStrokeWidth(r.COMPONENT_SET_BORDER_WIDTH / r.zoom)
   r.auxStroke.setColor(r.compColor())
   r.auxStroke.setPathEffect(
-    r.ck.PathEffect.MakeDash(
-      [r.COMPONENT_SET_DASH / r.zoom, r.COMPONENT_SET_DASH_GAP / r.zoom],
-      0
-    )
+    r.ck.PathEffect.MakeDash([r.COMPONENT_SET_DASH / r.zoom, r.COMPONENT_SET_DASH_GAP / r.zoom], 0)
   )
   canvas.drawRRect(rrect, r.auxStroke)
   r.auxStroke.setPathEffect(null)
@@ -283,17 +281,23 @@ function getShadowShapeChild(node: SceneNode, graph: SceneGraph): SceneNode | nu
 
 function getCapEntity(r: SkiaRenderer, cap: string | undefined): EmbindEnumEntity {
   switch (cap) {
-    case 'ROUND': return r.ck.StrokeCap.Round
-    case 'SQUARE': return r.ck.StrokeCap.Square
-    default: return r.ck.StrokeCap.Butt
+    case 'ROUND':
+      return r.ck.StrokeCap.Round
+    case 'SQUARE':
+      return r.ck.StrokeCap.Square
+    default:
+      return r.ck.StrokeCap.Butt
   }
 }
 
 function getJoinEntity(r: SkiaRenderer, join: string | undefined): EmbindEnumEntity {
   switch (join) {
-    case 'ROUND': return r.ck.StrokeJoin.Round
-    case 'BEVEL': return r.ck.StrokeJoin.Bevel
-    default: return r.ck.StrokeJoin.Miter
+    case 'ROUND':
+      return r.ck.StrokeJoin.Round
+    case 'BEVEL':
+      return r.ck.StrokeJoin.Bevel
+    default:
+      return r.ck.StrokeJoin.Miter
   }
 }
 
@@ -530,7 +534,9 @@ export function renderEffects(
         innerPath.delete()
       } else if (hasRadius) {
         const innerPath = new r.ck.Path()
-        innerPath.addRRect(r.makeRRectWithOffset(node, effect.offset.x + sp, effect.offset.y + sp, -sp))
+        innerPath.addRRect(
+          r.makeRRectWithOffset(node, effect.offset.x + sp, effect.offset.y + sp, -sp)
+        )
         bigPath.op(innerPath, r.ck.PathOp.Difference)
         innerPath.delete()
       } else {
@@ -558,11 +564,15 @@ export function renderText(r: SkiaRenderer, canvas: Canvas, node: SceneNode): vo
   const text = node.text
   if (!text) return
 
+  canvas.save()
+  canvas.clipRect(r.ck.LTRBRect(0, 0, node.width, node.height), r.ck.ClipOp.Intersect, false)
+
   if (node.textPicture) {
     const pic = r.ck.MakePicture(node.textPicture)
     if (pic) {
       canvas.drawPicture(pic)
       pic.delete()
+      canvas.restore()
       return
     }
   }
@@ -576,4 +586,6 @@ export function renderText(r: SkiaRenderer, canvas: Canvas, node: SceneNode): vo
     canvas.drawText(text, 0, node.fontSize || r.DEFAULT_FONT_SIZE, r.fillPaint, r.textFont)
     canvas.restore()
   }
+
+  canvas.restore()
 }

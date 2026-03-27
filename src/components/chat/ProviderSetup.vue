@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import ProviderSelect from '@/components/chat/ProviderSelect.vue'
+import ProviderSelectField from '@/components/chat/ProviderSelectField.vue'
 import { uiInput } from '@/components/ui/input'
 import { useAIChat } from '@/composables/use-chat'
 import { ACP_AGENTS } from '@open-pencil/core'
 
 const { providerID, providerDef, setAPIKey, customBaseURL, customModelID } = useAIChat()
+const { dialogs } = useI18n()
+
+const isACP = computed(() => providerID.value.startsWith('acp:'))
+const acpAgent = computed(() => {
+  if (!isACP.value) return null
+  const id = providerID.value.replace('acp:', '')
+  return ACP_AGENTS.find((a) => a.id === id) ?? null
+})
 
 const isACP = computed(() => providerID.value.startsWith('acp:'))
 const acpAgent = computed(() => {
@@ -36,7 +44,7 @@ function save() {
 <template>
   <div data-test-id="provider-setup" class="flex flex-1 flex-col items-center justify-center px-6">
     <icon-lucide-sparkles class="mb-3 size-7 text-muted" />
-    <p class="mb-5 text-center text-xs text-muted">Connect an AI provider to start chatting.</p>
+    <p class="mb-5 text-center text-xs text-muted">{{ dialogs.connectAIProvider }}</p>
 
     <form v-if="!isACP" class="flex w-full flex-col gap-2" @submit.prevent="save">
       <ProviderSelect
@@ -51,7 +59,7 @@ function save() {
         v-model="baseURLInput"
         type="text"
         data-test-id="provider-base-url"
-        placeholder="Base URL (e.g. http://localhost:11434/v1)"
+        :placeholder="dialogs.baseURLPlaceholder"
         :class="uiInput()"
       />
 
@@ -61,7 +69,7 @@ function save() {
         v-model="customModelInput"
         type="text"
         data-test-id="provider-custom-model"
-        placeholder="Model ID (e.g. llama-3.3-70b)"
+        :placeholder="dialogs.modelIDPlaceholder"
         :class="uiInput()"
       />
 
@@ -79,7 +87,7 @@ function save() {
         class="mt-1 w-full rounded bg-accent py-1.5 text-xs font-medium text-white hover:bg-accent/90"
         :disabled="!keyInput.trim()"
       >
-        Connect
+        {{ dialogs.connect }}
       </button>
     </form>
 
@@ -107,14 +115,14 @@ function save() {
       data-test-id="api-key-get-link"
       class="mt-2.5 text-[10px] text-muted underline hover:text-surface"
     >
-      Get an {{ providerDef.name }} API key →
+      {{ dialogs.getAPIKey({ provider: providerDef.name }) }}
     </a>
 
     <p
       v-if="providerID === 'openrouter'"
       class="mt-3 text-center text-[10px] leading-relaxed text-muted/50"
     >
-      One key for 100+ models from all providers.
+      {{ dialogs.oneKeyManyModels }}
     </p>
   </div>
 </template>

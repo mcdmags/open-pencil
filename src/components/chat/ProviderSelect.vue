@@ -58,6 +58,30 @@ const { triggerClass, itemClass, testId } = defineProps<{
   itemClass?: string
   testId?: string
 }>()
+
+const groups = computed(() => {
+  const result: Array<{ label?: string; items: Array<{ value: string; label: string }> }> = []
+
+  if (acpAgents.value.length) {
+    result.push({
+      label: 'Your agents',
+      items: acpAgents.value.map((agent) => ({
+        value: `acp:${agent.id}`,
+        label: agent.name
+      }))
+    })
+  }
+
+  result.push({
+    label: acpAgents.value.length ? 'API key' : undefined,
+    items: AI_PROVIDERS.map((provider) => ({
+      value: provider.id,
+      label: provider.name
+    }))
+  })
+
+  return result
+})
 </script>
 
 <template>
